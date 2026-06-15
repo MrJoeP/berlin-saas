@@ -1,0 +1,45 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Env und Secrets
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Supabase
+.branches
+.temp
+**/supabase/.branches
+**/supabase/.temp
+
+# Build-Output
+dist/
+build/
+out/
+.next/
+
+# Logs
+*.log
+logs/
+
+# Tests
+coverage/
+.nyc_output/
+
+# Lokale Notes
+NOTES_LOCAL.md
+SCRATCH/
