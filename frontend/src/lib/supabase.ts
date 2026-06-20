@@ -66,5 +66,7 @@ export interface DigestItem {
   summary: string | null;
   source_url: string | null;
   source_name: string | null;
+  source_tier: 1 | 2 | 3 | null;
+  cluster_confidence: "verified" | "editorial" | "community" | null;
   published_at: string | null;
 }

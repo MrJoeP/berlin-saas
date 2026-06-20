@@ -37,6 +37,30 @@ const TYPE_COLORS: Record<Digest["type"], string> = {
   ugc: "bg-orange-500 text-white",
 };
 
+const TIER_LABELS: Record<1 | 2 | 3, string> = {
+  1: "T1 · Primärquelle",
+  2: "T2 · Editorial",
+  3: "T3 · Community",
+};
+
+const TIER_COLORS: Record<1 | 2 | 3, string> = {
+  1: "bg-emerald-100 text-emerald-800 border-emerald-300",
+  2: "bg-blue-100 text-blue-800 border-blue-300",
+  3: "bg-amber-100 text-amber-800 border-amber-300",
+};
+
+const CONFIDENCE_LABELS: Record<"verified" | "editorial" | "community", string> = {
+  verified: "Verifiziert",
+  editorial: "Berichterstattung",
+  community: "Diskussion",
+};
+
+const CONFIDENCE_COLORS: Record<"verified" | "editorial" | "community", string> = {
+  verified: "bg-emerald-600 text-white",
+  editorial: "bg-blue-600 text-white",
+  community: "bg-amber-500 text-white",
+};
+
 export function Dashboard() {
   const navigate = useNavigate();
   const [company, setCompany] = useState<Company | null>(null);
@@ -224,33 +248,56 @@ export function Dashboard() {
                   </CardHeader>
                   <CardContent>
                     {Object.entries(groupByCluster(digest.items)).map(
-                      ([cluster, items]) => (
-                        <div key={cluster} className="mb-6 last:mb-0">
-                          <h3 className="text-sm font-semibold mb-2">{cluster}</h3>
-                          {items[0]?.summary && (
-                            <p className="text-sm text-[var(--color-fg)] mb-3">
-                              {items[0].summary}
-                            </p>
-                          )}
-                          <ul className="space-y-1">
-                            {items.map((item) => (
-                              <li key={item.id}>
-                                <a
-                                  href={item.source_url ?? "#"}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-sm text-[var(--color-accent)] hover:underline"
+                      ([cluster, items]) => {
+                        const confidence = items[0]?.cluster_confidence ?? null;
+                        return (
+                          <div key={cluster} className="mb-6 last:mb-0">
+                            <div className="flex items-center gap-2 mb-2">
+                              <h3 className="text-sm font-semibold">{cluster}</h3>
+                              {confidence && (
+                                <span
+                                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${CONFIDENCE_COLORS[confidence]}`}
                                 >
-                                  {item.title}
-                                </a>
-                                <span className="text-xs text-[var(--color-muted)] ml-2">
-                                  {item.source_name}
+                                  {CONFIDENCE_LABELS[confidence]}
                                 </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      ),
+                              )}
+                            </div>
+                            {items[0]?.summary && (
+                              <p className="text-sm text-[var(--color-fg)] mb-3">
+                                {items[0].summary}
+                              </p>
+                            )}
+                            <ul className="space-y-1.5">
+                              {items.map((item) => {
+                                const tier = (item.source_tier ?? 3) as 1 | 2 | 3;
+                                return (
+                                  <li key={item.id} className="flex items-start gap-2">
+                                    <span
+                                      className={`shrink-0 mt-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[tier]}`}
+                                      title={TIER_LABELS[tier]}
+                                    >
+                                      T{tier}
+                                    </span>
+                                    <div className="flex-1 min-w-0">
+                                      <a
+                                        href={item.source_url ?? "#"}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-sm text-[var(--color-accent)] hover:underline"
+                                      >
+                                        {item.title}
+                                      </a>
+                                      <span className="text-xs text-[var(--color-muted)] ml-2">
+                                        {item.source_name}
+                                      </span>
+                                    </div>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                        );
+                      },
                     )}
                   </CardContent>
                 </Card>

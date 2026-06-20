@@ -5,8 +5,7 @@ export type JobStatus = "pending" | "running" | "completed" | "failed";
 export type JobType =
   | "scrape_company"
   | "niche_news_scrape"
-  | "niche_news_cluster"
-  | "niche_news_send";
+  | "niche_news_cluster";
 
 export interface Job {
   id: string;
@@ -76,13 +75,18 @@ export interface Source {
   industry_tags: string[];
   config: Record<string, unknown>;
   is_default: boolean;
+  tier: 1 | 2 | 3;
+  min_score: number;
+  max_age_days: number;
 }
 
 export interface NewsItem {
   title: string;
   url: string;
   source_name: string;
+  source_tier: 1 | 2 | 3;
   published_at: string | null;
+  score: number | null;
   raw: Record<string, unknown>;
 }
 
