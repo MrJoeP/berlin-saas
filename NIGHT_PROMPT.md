@@ -42,7 +42,15 @@ Wenn du diesen Block siehst, prüfe nur kurz, ob alle Files in `supabase/migrati
 
 Migration 009 (cron jobs) ist NICHT erledigt. Sie wird im Nacht-Run noch NICHT angewendet, weil Service-Role-Key plus Supabase-Vault-Setup eine bewusste Entscheidung des Founders sind. Schreibe stattdessen einen Code-Draft als `supabase/migrations/009_cron_jobs.sql` mit Platzhaltern `<PROJECT_REF>` und `<SERVICE_ROLE_KEY>` plus TODO-Kommentaren. Nicht via `apply_migration` ausführen.
 
-### BLOCK B: EDGE-FUNCTION-SHARED-LAYER
+### BLÖCKE B, C, D, E, F SIND VOR DEM NACHT-RUN BEREITS ERLEDIGT
+
+**Diese Sektion ist nur noch als Doku im Repo, nicht mehr als Nacht-Aufgabe.**
+
+Shared Layer, Worker, Bot-Handler, Prompts, Doku-Updates wurden im Interactive-Mode erledigt. Wenn du den Nacht-Run startest und alles funktioniert, prüfe nur kurz die Konsistenz und mach `git status` um zu sehen ob ungestagte Änderungen liegen. Wenn ja, klare Diffs erklären und committen. Wenn alles clean ist, schreibe Status in `NOTES_NIGHT.md` und beende den Run.
+
+Verbleibende mögliche Aufgaben in der Nacht (nur wenn unbedingt nötig):
+
+#### BLOCK B: EDGE-FUNCTION-SHARED-LAYER (erledigt)
 B1. `supabase/functions/_shared/supabase.ts`
 - Supabase-Client-Factory mit Service-Role-Key aus Env.
 - TypeScript-Types für die wichtigsten Tables (companies, competitors, jobs, digests).

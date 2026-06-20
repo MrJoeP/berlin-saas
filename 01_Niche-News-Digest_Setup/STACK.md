@@ -1,6 +1,6 @@
 # Stack-Definition
 
-Schlank, kein n8n. Claude Code übernimmt die Build-Assistance.
+Schlank, kein n8n. Claude Code übernimmt die Build-Assistance. Orchestrator-Layer siehe [ORCHESTRATOR.md](../ORCHESTRATOR.md).
 
 ## KOMPONENTEN
 
