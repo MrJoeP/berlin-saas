@@ -32,9 +32,6 @@ interface ClusterAnalysis {
   cluster_name: string;
   confidence: Confidence;
   was_passiert: string;
-  warum_relevant: string;
-  industry_uneins: string;
-  action_woche: string[];
   key_quotes: { quote: string; source: string; url: string }[];
   trend_streak: number;
 }
@@ -105,7 +102,6 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
       digest_id: digest.id,
       cluster_name: a.cluster_name,
       confidence: a.confidence,
-      action_woche: a.action_woche,
     },
   }));
   if (knowledgeEntries.length > 0) {
@@ -224,29 +220,24 @@ async function deepSynthesize(
   trendStreak: number,
   trendMemory: { cluster_name: string; weeks_ago: number }[],
 ): Promise<Omit<ClusterAnalysis, "cluster_name" | "confidence" | "trend_streak">> {
-  // System-Prompt: Company-Context als cached prefix (>1024 chars für Caching-Eligibility).
-  const systemPrompt = `Du bist ein Senior-Strategy-Consultant der wöchentliche Industry-Briefings für Founder schreibt.
+  // Reine Faktensynthese — keine Empfehlungen, keine Meinungen, keine Action-Items.
+  const systemPrompt = `Du bist ein investigativer Journalist der Industry-Briefings auf Faktenbasis verfasst.
 
 Stil:
-- Kurz, scharf, konkret. Keine Marketing-Sprache, kein KI-Klang.
-- Zitiere direkt aus Originalquellen wenn möglich (mit Source-Name).
-- Action-orientiert: was bedeutet das für DIESE Firma KONKRET diese Woche.
+- Faktisch, präzise, neutral. Keine Empfehlungen, keine Meinungen, keine Action-Items.
+- Zitiere wörtlich aus Originalquellen (mit Source-Name).
+- Keine Marketing-Sprache, kein KI-Klang.
+- Konzentriere dich darauf was passiert ist, nicht was zu tun wäre.
 
-Company-Profil:
+Company-Profil (nur als Kontext für inhaltliche Relevanz-Einordnung, NICHT für Empfehlungen):
 - Firma: ${company.name}
 - Industrie: ${company.industry}
 - Nische: ${company.niche ?? "unbekannt"}
 - Keywords: ${company.keywords.join(", ")}
-- Tagline: ${company.tagline ?? "unbekannt"}
-- Value-Props: ${(company.profile_json?.value_props as string[] | undefined ?? []).join(" | ")}
-- Tone: ${(company.profile_json?.tone_signals as string[] | undefined ?? []).join(" | ")}
 
 Output-Schema (strikt JSON, keine Prosa drumherum):
 {
-  "was_passiert": "2-3 Sätze: was ist die Kernnachricht. Mit Datum und Zitat aus Primärquelle wenn vorhanden.",
-  "warum_relevant": "2-3 Sätze: was bedeutet das spezifisch für ${company.name} und seine Kunden. Konkrete Verknüpfung mit der Nische.",
-  "industry_uneins": "1-2 Sätze: wo widersprechen sich die Quellen oder gibt es offene Fragen. Wenn Konsens herrscht: kurzer Hinweis darauf.",
-  "action_woche": ["3 bis 5 konkrete Schritte die ${company.name} diese Woche umsetzen kann. Jeder Schritt 1 Satz, Imperativ."],
+  "was_passiert": "3-5 Sätze: was ist die Kernnachricht. Mit Datum, Zahlen und Zitat aus Primärquelle. Konzentriere dich auf Fakten, nicht Interpretation.",
   "key_quotes": [
     { "quote": "Wörtliches Zitat unter 30 Wörtern", "source": "Source-Name", "url": "Source-URL" }
   ]

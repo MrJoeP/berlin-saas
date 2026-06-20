@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
+import { ArrowRight, RefreshCw, ChevronDown, ChevronRight, ArrowBigUp } from "lucide-react";
 import {
   supabase,
   type Company,
@@ -56,65 +56,77 @@ const CONFIDENCE_LABELS: Record<"verified" | "editorial" | "community", string> 
   community: "Diskussion",
 };
 
-function ItemList({ items }: { items: DigestItem[] }) {
+// Plattform-Mapping aus source_name. Für Community-News-Gruppierung.
+function detectPlatform(sourceName: string | null): string {
+  if (!sourceName) return "Andere";
+  const s = sourceName.toLowerCase();
+  if (s.startsWith("r/")) return "Reddit";
+  if (s.includes("hacker news") || s.startsWith("hn ")) return "Hacker News";
+  if (s.includes("product hunt") || s === "producthunt") return "Product Hunt";
+  if (s.includes("twitter") || s.includes("x.com") || s === "x") return "Twitter/X";
+  if (s.includes("youtube")) return "YouTube";
+  if (s.includes("linkedin")) return "LinkedIn";
+  return sourceName;
+}
+
+function ItemRow({ item, onUpvote }: { item: DigestItem; onUpvote: (id: string) => void }) {
+  const tier = (item.source_tier ?? 3) as 1 | 2 | 3;
+  return (
+    <li className="flex items-start gap-2 group">
+      <button
+        type="button"
+        onClick={() => onUpvote(item.id)}
+        className="shrink-0 mt-0.5 flex flex-col items-center justify-center w-8 px-1 py-0.5 rounded hover:bg-[var(--color-bg)] transition-colors text-[var(--color-muted)] hover:text-[var(--color-accent)]"
+        title="Upvote — für Algorithmus markieren"
+      >
+        <ArrowBigUp className="w-4 h-4" />
+        <span className="text-[10px] font-medium tabular-nums leading-none">{item.upvotes ?? 0}</span>
+      </button>
+      <span
+        className={`shrink-0 mt-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[tier]}`}
+        title={TIER_LABELS[tier]}
+      >
+        T{tier}
+      </span>
+      <div className="flex-1 min-w-0 mt-0.5">
+        <a
+          href={item.source_url ?? "#"}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm text-[var(--color-accent)] hover:underline"
+        >
+          {item.title}
+        </a>
+        <div className="text-xs text-[var(--color-muted)] mt-0.5">
+          {item.source_name}
+          {item.published_at && (
+            <span className="ml-2">· {formatRelative(item.published_at)}</span>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function ItemList({ items, onUpvote }: { items: DigestItem[]; onUpvote: (id: string) => void }) {
   return (
     <ul className="space-y-1.5">
-      {items.map((item) => {
-        const tier = (item.source_tier ?? 3) as 1 | 2 | 3;
-        return (
-          <li key={item.id} className="flex items-start gap-2">
-            <span
-              className={`shrink-0 mt-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[tier]}`}
-              title={TIER_LABELS[tier]}
-            >
-              T{tier}
-            </span>
-            <div className="flex-1 min-w-0">
-              <a
-                href={item.source_url ?? "#"}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-[var(--color-accent)] hover:underline"
-              >
-                {item.title}
-              </a>
-              <div className="text-xs text-[var(--color-muted)] mt-0.5">
-                {item.source_name}
-                {item.published_at && (
-                  <span className="ml-2">· {formatRelative(item.published_at)}</span>
-                )}
-              </div>
-            </div>
-          </li>
-        );
-      })}
+      {items.map((item) => <ItemRow key={item.id} item={item} onUpvote={onUpvote} />)}
     </ul>
   );
 }
 
-function DeepAnalysisView({ analysis, items }: { analysis: ClusterAnalysis; items: DigestItem[] }) {
+function DeepAnalysisView({ analysis, items, onUpvote }: { analysis: ClusterAnalysis; items: DigestItem[]; onUpvote: (id: string) => void }) {
   return (
     <div className="pt-3 space-y-4">
-      <Block label="Was passiert ist" body={analysis.was_passiert} />
-      <Block label={`Warum für deine Nische relevant`} body={analysis.warum_relevant} highlight />
-      {analysis.industry_uneins && (
-        <Block label="Wo die Industry uneins ist" body={analysis.industry_uneins} />
-      )}
-      {analysis.action_woche?.length > 0 && (
-        <div>
-          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1.5">
-            Diese Woche
-          </div>
-          <ul className="space-y-1">
-            {analysis.action_woche.map((step, idx) => (
-              <li key={idx} className="text-sm text-[var(--color-fg)] flex gap-2">
-                <span className="text-[var(--color-muted)] shrink-0">{idx + 1}.</span>
-                <span>{step}</span>
-              </li>
-            ))}
-          </ul>
+      <div>
+        <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1">
+          Was passiert ist
         </div>
-      )}
+        <p className="text-sm leading-relaxed text-[var(--color-fg)]">
+          {analysis.was_passiert}
+        </p>
+      </div>
       {analysis.key_quotes?.length > 0 && (
         <div>
           <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1.5">
@@ -140,33 +152,95 @@ function DeepAnalysisView({ analysis, items }: { analysis: ClusterAnalysis; item
           </div>
         </div>
       )}
-      <details className="pt-2 border-t border-[var(--color-border)]">
+      <details className="pt-2 border-t border-[var(--color-border)]" open>
         <summary className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)] cursor-pointer hover:text-[var(--color-fg)]">
           Alle Quellen ({items.length})
         </summary>
         <div className="mt-2">
-          <ItemList items={items} />
+          <ItemList items={items} onUpvote={onUpvote} />
         </div>
       </details>
     </div>
   );
 }
 
-function Block({ label, body, highlight = false }: { label: string; body: string; highlight?: boolean }) {
+// Community-News: T3-Items nach Plattform gruppiert (Reddit, HN, Twitter/X, YouTube, LinkedIn).
+// Keine LLM-Synthese, reine Sammlung mit Upvote-Funktion.
+function CommunitySection({
+  items,
+  digestId,
+  expanded,
+  toggle,
+  onUpvote,
+}: {
+  items: DigestItem[];
+  digestId: string;
+  expanded: Record<string, boolean>;
+  toggle: (key: string) => void;
+  onUpvote: (id: string) => void;
+}) {
+  const byPlatform: Record<string, DigestItem[]> = {};
+  for (const item of items) {
+    const platform = detectPlatform(item.source_name);
+    if (!byPlatform[platform]) byPlatform[platform] = [];
+    byPlatform[platform].push(item);
+  }
+  // Sort: höchstes Upvote-Total zuerst, dann nach Item-Anzahl.
+  const entries = Object.entries(byPlatform).sort((a, b) => {
+    const upA = a[1].reduce((s, i) => s + (i.upvotes ?? 0), 0);
+    const upB = b[1].reduce((s, i) => s + (i.upvotes ?? 0), 0);
+    if (upA !== upB) return upB - upA;
+    return b[1].length - a[1].length;
+  });
   return (
-    <div>
-      <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1">
-        {label}
+    <div className="mb-6 last:mb-0 opacity-95">
+      <div className="flex items-baseline gap-2 mb-3 pb-2 border-b border-[var(--color-border)]">
+        <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-fg)]">
+          Community News
+        </h2>
+        <span className="text-[10px] text-[var(--color-muted)]">
+          Reddit, Hacker News, Twitter/X, YouTube, LinkedIn · roh, ungeprüft
+        </span>
       </div>
-      <p
-        className={`text-sm leading-relaxed ${
-          highlight
-            ? "text-[var(--color-fg)] bg-amber-50 px-3 py-2 rounded border-l-2 border-amber-400"
-            : "text-[var(--color-fg)]"
-        }`}
-      >
-        {body}
-      </p>
+      <div className="space-y-1">
+        {entries.map(([platform, platformItems]) => {
+          const key = `${digestId}|community|${platform}`;
+          const isOpen = !!expanded[key];
+          const upvoteTotal = platformItems.reduce((s, i) => s + (i.upvotes ?? 0), 0);
+          return (
+            <div key={platform} className="border border-[var(--color-border)] rounded-md overflow-hidden">
+              <button
+                type="button"
+                onClick={() => toggle(key)}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--color-bg)] transition-colors text-left"
+              >
+                {isOpen ? (
+                  <ChevronDown className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
+                )}
+                <span className="text-sm font-semibold flex-1 truncate">{platform}</span>
+                {upvoteTotal > 0 && (
+                  <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-orange-100 text-orange-800">
+                    ▲ {upvoteTotal}
+                  </span>
+                )}
+                <span className="shrink-0 text-xs text-[var(--color-muted)] tabular-nums">
+                  {platformItems.length}
+                </span>
+              </button>
+              {isOpen && (
+                <div className="px-3 pb-3 pt-2 border-t border-[var(--color-border)]">
+                  <ItemList
+                    items={[...platformItems].sort((a, b) => (b.upvotes ?? 0) - (a.upvotes ?? 0))}
+                    onUpvote={onUpvote}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -179,6 +253,7 @@ function Section({
   expanded,
   toggle,
   analyses,
+  onUpvote,
   dimmed = false,
 }: {
   title: string;
@@ -188,6 +263,7 @@ function Section({
   expanded: Record<string, boolean>;
   toggle: (key: string) => void;
   analyses: ClusterAnalysis[];
+  onUpvote: (id: string) => void;
   dimmed?: boolean;
 }) {
   return (
@@ -236,13 +312,13 @@ function Section({
               {isOpen && (
                 <div className="px-3 pb-3 pt-1 border-t border-[var(--color-border)]">
                   {analysis ? (
-                    <DeepAnalysisView analysis={analysis} items={items} />
+                    <DeepAnalysisView analysis={analysis} items={items} onUpvote={onUpvote} />
                   ) : (
                     <>
                       {items[0]?.summary && (
                         <p className="text-sm text-[var(--color-fg)] mb-3 mt-2">{items[0].summary}</p>
                       )}
-                      <ItemList items={items} />
+                      <ItemList items={items} onUpvote={onUpvote} />
                     </>
                   )}
                 </div>
@@ -272,6 +348,22 @@ export function Dashboard() {
 
   function toggleCluster(key: string) {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
+
+  async function upvoteItem(itemId: string) {
+    // Optimistic UI Update.
+    setDigests((prev) =>
+      prev.map((d) => ({
+        ...d,
+        items: d.items.map((it) =>
+          it.id === itemId ? { ...it, upvotes: (it.upvotes ?? 0) + 1 } : it,
+        ),
+      })),
+    );
+    // DB-Write — Failures sind nicht kritisch (Counter wird beim nächsten Reload re-synced).
+    const current = digests.flatMap((d) => d.items).find((it) => it.id === itemId);
+    const next = (current?.upvotes ?? 0) + 1;
+    await supabase.from("digest_items").update({ upvotes: next }).eq("id", itemId);
   }
 
   useEffect(() => {
@@ -455,11 +547,22 @@ export function Dashboard() {
                     {(() => {
                       const grouped = groupByCluster(digest.items);
                       const fachmeinung: [string, DigestItem[]][] = [];
-                      const stimmungsbild: [string, DigestItem[]][] = [];
+                      // T3-Items werden separat als Community-News gerendert, nicht in Clustern.
+                      const communityItems: DigestItem[] = [];
                       for (const entry of Object.entries(grouped)) {
                         const confidence = entry[1][0]?.cluster_confidence;
-                        if (confidence === "community") stimmungsbild.push(entry);
-                        else fachmeinung.push(entry);
+                        if (confidence === "community") {
+                          communityItems.push(...entry[1]);
+                        } else {
+                          fachmeinung.push(entry);
+                        }
+                      }
+                      // Auch reine T3-Items aus anderen Clustern in die Community-Sektion ziehen.
+                      for (const item of digest.items) {
+                        if (item.source_tier === 3 && !communityItems.some((c) => c.id === item.id)) {
+                          // Nur wenn nicht schon Teil eines Community-Clusters.
+                          if (item.cluster_confidence !== "community") communityItems.push(item);
+                        }
                       }
                       const analyses = digest.cluster_analyses ?? [];
                       return (
@@ -467,24 +570,22 @@ export function Dashboard() {
                           {fachmeinung.length > 0 && (
                             <Section
                               title="Fachmeinung"
-                              hint="Primärquellen und Industry-Pubs"
+                              hint="Primärquellen und Industry-Pubs · faktische Synthese"
                               clusters={fachmeinung}
                               digestId={digest.id}
                               expanded={expanded}
                               toggle={toggleCluster}
                               analyses={analyses}
+                              onUpvote={upvoteItem}
                             />
                           )}
-                          {stimmungsbild.length > 0 && (
-                            <Section
-                              title="Stimmungsbild"
-                              hint="Community-Diskussionen, ungeprüft"
-                              clusters={stimmungsbild}
+                          {communityItems.length > 0 && (
+                            <CommunitySection
+                              items={communityItems}
                               digestId={digest.id}
                               expanded={expanded}
                               toggle={toggleCluster}
-                              analyses={analyses}
-                              dimmed
+                              onUpvote={upvoteItem}
                             />
                           )}
                         </>

@@ -53,9 +53,6 @@ export interface ClusterAnalysis {
   cluster_name: string;
   confidence: "verified" | "editorial" | "community";
   was_passiert: string;
-  warum_relevant: string;
-  industry_uneins: string;
-  action_woche: string[];
   key_quotes: { quote: string; source: string; url: string }[];
   trend_streak: number;
 }
@@ -81,4 +78,5 @@ export interface DigestItem {
   source_tier: 1 | 2 | 3 | null;
   cluster_confidence: "verified" | "editorial" | "community" | null;
   published_at: string | null;
+  upvotes: number;
 }
