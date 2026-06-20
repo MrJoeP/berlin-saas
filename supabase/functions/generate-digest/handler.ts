@@ -9,7 +9,7 @@
 
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { Job, NewsItem, DigestCluster, Company } from "../_shared/types.ts";
-import { callClaude, callClaudeJSON, SONNET_MODEL } from "../_shared/claude.ts";
+import { callClaude, callClaudeJSON, DEFAULT_MODEL } from "../_shared/claude.ts";
 
 const CLUSTERING_PROMPT = `Du erhältst eine Liste von News-Items aus verschiedenen Quellen
 mit Quellen-Tier (1=Primärquelle, 2=Editorial, 3=Community).
@@ -112,7 +112,7 @@ async function clusterItems(items: NewsItem[], company: Company): Promise<Digest
     .map((item, idx) => `[${idx}] T${item.source_tier ?? 3} | ${item.title} (${item.source_name})`)
     .join("\n");
   const result = await callClaudeJSON<{ clusters: { cluster_name: string; item_indices: number[] }[] }>({
-    model: SONNET_MODEL,
+    model: DEFAULT_MODEL,
     system: CLUSTERING_PROMPT,
     messages: [{
       role: "user",

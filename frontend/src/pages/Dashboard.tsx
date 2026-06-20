@@ -15,7 +15,7 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/Card";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatRelative } from "@/lib/utils";
 
 interface DigestWithItems extends Digest {
   items: DigestItem[];
@@ -54,6 +54,80 @@ const CONFIDENCE_LABELS: Record<"verified" | "editorial" | "community", string> 
   editorial: "Berichterstattung",
   community: "Diskussion",
 };
+
+function Section({
+  title,
+  hint,
+  clusters,
+  dimmed = false,
+}: {
+  title: string;
+  hint: string;
+  clusters: [string, DigestItem[]][];
+  dimmed?: boolean;
+}) {
+  return (
+    <div className={`mb-6 last:mb-0 ${dimmed ? "opacity-90" : ""}`}>
+      <div className="flex items-baseline gap-2 mb-3 pb-2 border-b border-[var(--color-border)]">
+        <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-fg)]">
+          {title}
+        </h2>
+        <span className="text-[10px] text-[var(--color-muted)]">{hint}</span>
+      </div>
+      {clusters.map(([clusterName, items]) => {
+        const confidence = items[0]?.cluster_confidence ?? null;
+        return (
+          <div key={clusterName} className="mb-5 last:mb-0">
+            <div className="flex items-center gap-2 mb-2">
+              <h3 className="text-sm font-semibold">{clusterName}</h3>
+              {confidence && (
+                <span
+                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${CONFIDENCE_COLORS[confidence]}`}
+                >
+                  {CONFIDENCE_LABELS[confidence]}
+                </span>
+              )}
+            </div>
+            {items[0]?.summary && (
+              <p className="text-sm text-[var(--color-fg)] mb-3">{items[0].summary}</p>
+            )}
+            <ul className="space-y-1.5">
+              {items.map((item) => {
+                const tier = (item.source_tier ?? 3) as 1 | 2 | 3;
+                return (
+                  <li key={item.id} className="flex items-start gap-2">
+                    <span
+                      className={`shrink-0 mt-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[tier]}`}
+                      title={TIER_LABELS[tier]}
+                    >
+                      T{tier}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <a
+                        href={item.source_url ?? "#"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-[var(--color-accent)] hover:underline"
+                      >
+                        {item.title}
+                      </a>
+                      <div className="text-xs text-[var(--color-muted)] mt-0.5">
+                        {item.source_name}
+                        {item.published_at && (
+                          <span className="ml-2">· {formatRelative(item.published_at)}</span>
+                        )}
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 const CONFIDENCE_COLORS: Record<"verified" | "editorial" | "community", string> = {
   verified: "bg-emerald-600 text-white",
@@ -247,58 +321,35 @@ export function Dashboard() {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    {Object.entries(groupByCluster(digest.items)).map(
-                      ([cluster, items]) => {
-                        const confidence = items[0]?.cluster_confidence ?? null;
-                        return (
-                          <div key={cluster} className="mb-6 last:mb-0">
-                            <div className="flex items-center gap-2 mb-2">
-                              <h3 className="text-sm font-semibold">{cluster}</h3>
-                              {confidence && (
-                                <span
-                                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${CONFIDENCE_COLORS[confidence]}`}
-                                >
-                                  {CONFIDENCE_LABELS[confidence]}
-                                </span>
-                              )}
-                            </div>
-                            {items[0]?.summary && (
-                              <p className="text-sm text-[var(--color-fg)] mb-3">
-                                {items[0].summary}
-                              </p>
-                            )}
-                            <ul className="space-y-1.5">
-                              {items.map((item) => {
-                                const tier = (item.source_tier ?? 3) as 1 | 2 | 3;
-                                return (
-                                  <li key={item.id} className="flex items-start gap-2">
-                                    <span
-                                      className={`shrink-0 mt-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[tier]}`}
-                                      title={TIER_LABELS[tier]}
-                                    >
-                                      T{tier}
-                                    </span>
-                                    <div className="flex-1 min-w-0">
-                                      <a
-                                        href={item.source_url ?? "#"}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-sm text-[var(--color-accent)] hover:underline"
-                                      >
-                                        {item.title}
-                                      </a>
-                                      <span className="text-xs text-[var(--color-muted)] ml-2">
-                                        {item.source_name}
-                                      </span>
-                                    </div>
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          </div>
-                        );
-                      },
-                    )}
+                    {(() => {
+                      const grouped = groupByCluster(digest.items);
+                      const fachmeinung: [string, DigestItem[]][] = [];
+                      const stimmungsbild: [string, DigestItem[]][] = [];
+                      for (const entry of Object.entries(grouped)) {
+                        const confidence = entry[1][0]?.cluster_confidence;
+                        if (confidence === "community") stimmungsbild.push(entry);
+                        else fachmeinung.push(entry);
+                      }
+                      return (
+                        <>
+                          {fachmeinung.length > 0 && (
+                            <Section
+                              title="Fachmeinung"
+                              hint="Primärquellen und Industry-Pubs"
+                              clusters={fachmeinung}
+                            />
+                          )}
+                          {stimmungsbild.length > 0 && (
+                            <Section
+                              title="Stimmungsbild"
+                              hint="Community-Diskussionen, ungeprüft"
+                              clusters={stimmungsbild}
+                              dimmed
+                            />
+                          )}
+                        </>
+                      );
+                    })()}
                   </CardContent>
                 </Card>
               ))}
