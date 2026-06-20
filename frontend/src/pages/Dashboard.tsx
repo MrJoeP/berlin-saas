@@ -22,6 +22,22 @@ interface DigestWithItems extends Digest {
   items: DigestItem[];
 }
 
+type DigestFilter = Digest["type"] | "all";
+
+const TYPE_LABELS: Record<Digest["type"], string> = {
+  niche_news: "Niche News",
+  top_post: "Top Posts",
+  competitor: "Wettbewerb",
+  ugc: "UGC",
+};
+
+const TYPE_COLORS: Record<Digest["type"], string> = {
+  niche_news: "bg-[var(--color-accent)] text-white",
+  top_post: "bg-emerald-600 text-white",
+  competitor: "bg-purple-600 text-white",
+  ugc: "bg-orange-500 text-white",
+};
+
 export function Dashboard() {
   const navigate = useNavigate();
   const { session, signOut } = useAuth();
@@ -29,6 +45,7 @@ export function Dashboard() {
   const [digests, setDigests] = useState<DigestWithItems[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<DigestFilter>("all");
 
   useEffect(() => {
     if (!session) return;
@@ -100,7 +117,6 @@ export function Dashboard() {
     return null;
   }
 
-  // Items pro Cluster gruppieren.
   function groupByCluster(items: DigestItem[]) {
     const map: Record<string, DigestItem[]> = {};
     for (const item of items) {
@@ -111,9 +127,18 @@ export function Dashboard() {
     return map;
   }
 
+  const availableTypes = Array.from(new Set(digests.map((d) => d.type)));
+  const showTabs = availableTypes.length > 1;
+
+  const visibleDigests =
+    activeFilter === "all"
+      ? digests
+      : digests.filter((d) => d.type === activeFilter);
+
   return (
     <div className="min-h-screen px-4 py-8">
       <div className="max-w-4xl mx-auto">
+        {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-2xl font-semibold">{company.name}</h1>
@@ -137,11 +162,13 @@ export function Dashboard() {
           <Card>
             <CardContent className="text-center py-12">
               <p className="text-sm text-[var(--color-fg)] mb-2">
-                Noch kein Digest. Triggere den ersten Run.
+                Noch kein Digest vorhanden.
               </p>
-              <p className="text-xs text-[var(--color-muted)] mb-4">
-                Setup wurde vor {formatDate(company.created_at)} abgeschlossen.
-                Sources werden gescraped, Digest wird in wenigen Minuten erzeugt.
+              <p className="text-xs text-[var(--color-muted)] mb-1">
+                Unternehmen angelegt {formatDate(company.created_at)}.
+              </p>
+              <p className="text-xs text-[var(--color-muted)] mb-6">
+                Voraussetzung: ANTHROPIC_API_KEY und RESEND_API_KEY müssen als Supabase Secrets gesetzt sein.
               </p>
               <Button onClick={triggerRun} disabled={triggering}>
                 {triggering ? "Job läuft..." : "Ersten Run starten"}
@@ -150,48 +177,95 @@ export function Dashboard() {
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-6">
-            {digests.map((digest) => (
-              <Card key={digest.id}>
-                <CardHeader>
-                  <CardTitle>{digest.title}</CardTitle>
-                  <CardDescription>
-                    Erzeugt {formatDate(digest.generated_at)}
-                    {digest.delivered_at && ` · gesendet ${formatDate(digest.delivered_at)}`}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {Object.entries(groupByCluster(digest.items)).map(([cluster, items]) => (
-                    <div key={cluster} className="mb-6 last:mb-0">
-                      <h3 className="text-sm font-semibold mb-2">{cluster}</h3>
-                      {items[0]?.summary && (
-                        <p className="text-sm text-[var(--color-fg)] mb-3">
-                          {items[0].summary}
-                        </p>
-                      )}
-                      <ul className="space-y-1">
-                        {items.map((item) => (
-                          <li key={item.id}>
-                            <a
-                              href={item.source_url ?? "#"}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-sm text-[var(--color-accent)] hover:underline"
-                            >
-                              {item.title}
-                            </a>
-                            <span className="text-xs text-[var(--color-muted)] ml-2">
-                              {item.source_name}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
+          <>
+            {/* Filter-Tabs — erst sichtbar sobald mehrere Digest-Typen vorhanden */}
+            {showTabs && (
+              <div className="flex gap-2 mb-6 flex-wrap">
+                <button
+                  onClick={() => setActiveFilter("all")}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                    activeFilter === "all"
+                      ? "bg-[var(--color-accent)] text-white"
+                      : "bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-fg)]"
+                  }`}
+                >
+                  Alle <span className="opacity-70">{digests.length}</span>
+                </button>
+                {availableTypes.map((type) => (
+                  <button
+                    key={type}
+                    onClick={() => setActiveFilter(type)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                      activeFilter === type
+                        ? "bg-[var(--color-accent)] text-white"
+                        : "bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-fg)]"
+                    }`}
+                  >
+                    {TYPE_LABELS[type]}{" "}
+                    <span className="opacity-70">
+                      {digests.filter((d) => d.type === type).length}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Digest-Feed */}
+            <div className="space-y-6">
+              {visibleDigests.map((digest) => (
+                <Card key={digest.id}>
+                  <CardHeader>
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <CardTitle>{digest.title}</CardTitle>
+                        <CardDescription>
+                          Erzeugt {formatDate(digest.generated_at)}
+                          {digest.delivered_at &&
+                            ` · gesendet ${formatDate(digest.delivered_at)}`}
+                        </CardDescription>
+                      </div>
+                      <span
+                        className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${TYPE_COLORS[digest.type]}`}
+                      >
+                        {TYPE_LABELS[digest.type]}
+                      </span>
                     </div>
-                  ))}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                  </CardHeader>
+                  <CardContent>
+                    {Object.entries(groupByCluster(digest.items)).map(
+                      ([cluster, items]) => (
+                        <div key={cluster} className="mb-6 last:mb-0">
+                          <h3 className="text-sm font-semibold mb-2">{cluster}</h3>
+                          {items[0]?.summary && (
+                            <p className="text-sm text-[var(--color-fg)] mb-3">
+                              {items[0].summary}
+                            </p>
+                          )}
+                          <ul className="space-y-1">
+                            {items.map((item) => (
+                              <li key={item.id}>
+                                <a
+                                  href={item.source_url ?? "#"}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-sm text-[var(--color-accent)] hover:underline"
+                                >
+                                  {item.title}
+                                </a>
+                                <span className="text-xs text-[var(--color-muted)] ml-2">
+                                  {item.source_name}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ),
+                    )}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </>
         )}
       </div>
     </div>
