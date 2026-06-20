@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, RefreshCw, LogOut } from "lucide-react";
+import { ArrowRight, RefreshCw } from "lucide-react";
 import {
   supabase,
   type Company,
   type Digest,
   type DigestItem,
 } from "@/lib/supabase";
-import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/Button";
 import {
   Card,
@@ -40,7 +39,6 @@ const TYPE_COLORS: Record<Digest["type"], string> = {
 
 export function Dashboard() {
   const navigate = useNavigate();
-  const { session, signOut } = useAuth();
   const [company, setCompany] = useState<Company | null>(null);
   const [digests, setDigests] = useState<DigestWithItems[]>([]);
   const [loading, setLoading] = useState(true);
@@ -48,9 +46,8 @@ export function Dashboard() {
   const [activeFilter, setActiveFilter] = useState<DigestFilter>("all");
 
   useEffect(() => {
-    if (!session) return;
     loadData();
-  }, [session]);
+  }, []);
 
   async function loadData() {
     setLoading(true);
@@ -147,15 +144,10 @@ export function Dashboard() {
               {company.niche && ` · ${company.niche}`}
             </p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="secondary" size="sm" onClick={triggerRun} disabled={triggering}>
-              <RefreshCw className={`w-4 h-4 mr-1 ${triggering ? "animate-spin" : ""}`} />
-              {triggering ? "Triggered..." : "Run now"}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={signOut}>
-              <LogOut className="w-4 h-4" />
-            </Button>
-          </div>
+          <Button variant="secondary" size="sm" onClick={triggerRun} disabled={triggering}>
+            <RefreshCw className={`w-4 h-4 mr-1 ${triggering ? "animate-spin" : ""}`} />
+            {triggering ? "Triggered..." : "Run now"}
+          </Button>
         </div>
 
         {digests.length === 0 ? (

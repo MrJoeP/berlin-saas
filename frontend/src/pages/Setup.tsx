@@ -2,7 +2,6 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { Plus, Trash2 } from "lucide-react";
 import { supabase, type Industry, type Source } from "@/lib/supabase";
-import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Field, Textarea } from "@/components/ui/Input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/Card";
@@ -33,9 +32,11 @@ const initialState: FormState = {
   selected_sources: [],
 };
 
+// Feste owner-ID für dieses Personal Tool (kein Login).
+const OWNER_ID = "00000000-0000-0000-0000-000000000001";
+
 export function Setup() {
   const navigate = useNavigate();
-  const { session } = useAuth();
   const [step, setStep] = useState<Step>(1);
   const [form, setForm] = useState<FormState>(initialState);
   const [industries, setIndustries] = useState<Industry[]>([]);
@@ -98,11 +99,6 @@ export function Setup() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    if (!session?.user) {
-      setError("Keine Session.");
-      return;
-    }
-
     setSubmitting(true);
     setError(null);
 
@@ -110,7 +106,7 @@ export function Setup() {
       const { data: company, error: companyErr } = await supabase
         .from("companies")
         .insert({
-          user_id: session.user.id,
+          user_id: OWNER_ID,
           name: form.name,
           url: form.url || null,
           tagline: form.tagline || null,
