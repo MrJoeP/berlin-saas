@@ -6,6 +6,7 @@ import {
   type Company,
   type Digest,
   type DigestItem,
+  type ClusterAnalysis,
 } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import {
@@ -55,6 +56,121 @@ const CONFIDENCE_LABELS: Record<"verified" | "editorial" | "community", string> 
   community: "Diskussion",
 };
 
+function ItemList({ items }: { items: DigestItem[] }) {
+  return (
+    <ul className="space-y-1.5">
+      {items.map((item) => {
+        const tier = (item.source_tier ?? 3) as 1 | 2 | 3;
+        return (
+          <li key={item.id} className="flex items-start gap-2">
+            <span
+              className={`shrink-0 mt-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[tier]}`}
+              title={TIER_LABELS[tier]}
+            >
+              T{tier}
+            </span>
+            <div className="flex-1 min-w-0">
+              <a
+                href={item.source_url ?? "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-[var(--color-accent)] hover:underline"
+              >
+                {item.title}
+              </a>
+              <div className="text-xs text-[var(--color-muted)] mt-0.5">
+                {item.source_name}
+                {item.published_at && (
+                  <span className="ml-2">· {formatRelative(item.published_at)}</span>
+                )}
+              </div>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function DeepAnalysisView({ analysis, items }: { analysis: ClusterAnalysis; items: DigestItem[] }) {
+  return (
+    <div className="pt-3 space-y-4">
+      <Block label="Was passiert ist" body={analysis.was_passiert} />
+      <Block label={`Warum für deine Nische relevant`} body={analysis.warum_relevant} highlight />
+      {analysis.industry_uneins && (
+        <Block label="Wo die Industry uneins ist" body={analysis.industry_uneins} />
+      )}
+      {analysis.action_woche?.length > 0 && (
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1.5">
+            Diese Woche
+          </div>
+          <ul className="space-y-1">
+            {analysis.action_woche.map((step, idx) => (
+              <li key={idx} className="text-sm text-[var(--color-fg)] flex gap-2">
+                <span className="text-[var(--color-muted)] shrink-0">{idx + 1}.</span>
+                <span>{step}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {analysis.key_quotes?.length > 0 && (
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1.5">
+            Zitate
+          </div>
+          <div className="space-y-2">
+            {analysis.key_quotes.map((q, idx) => (
+              <blockquote key={idx} className="border-l-2 border-[var(--color-accent)] pl-3 py-1">
+                <p className="text-sm italic text-[var(--color-fg)]">"{q.quote}"</p>
+                <p className="text-xs text-[var(--color-muted)] mt-1">
+                  —{" "}
+                  <a
+                    href={q.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[var(--color-accent)] hover:underline"
+                  >
+                    {q.source}
+                  </a>
+                </p>
+              </blockquote>
+            ))}
+          </div>
+        </div>
+      )}
+      <details className="pt-2 border-t border-[var(--color-border)]">
+        <summary className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)] cursor-pointer hover:text-[var(--color-fg)]">
+          Alle Quellen ({items.length})
+        </summary>
+        <div className="mt-2">
+          <ItemList items={items} />
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function Block({ label, body, highlight = false }: { label: string; body: string; highlight?: boolean }) {
+  return (
+    <div>
+      <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1">
+        {label}
+      </div>
+      <p
+        className={`text-sm leading-relaxed ${
+          highlight
+            ? "text-[var(--color-fg)] bg-amber-50 px-3 py-2 rounded border-l-2 border-amber-400"
+            : "text-[var(--color-fg)]"
+        }`}
+      >
+        {body}
+      </p>
+    </div>
+  );
+}
+
 function Section({
   title,
   hint,
@@ -62,6 +178,7 @@ function Section({
   digestId,
   expanded,
   toggle,
+  analyses,
   dimmed = false,
 }: {
   title: string;
@@ -70,6 +187,7 @@ function Section({
   digestId: string;
   expanded: Record<string, boolean>;
   toggle: (key: string) => void;
+  analyses: ClusterAnalysis[];
   dimmed?: boolean;
 }) {
   return (
@@ -85,6 +203,7 @@ function Section({
           const confidence = items[0]?.cluster_confidence ?? null;
           const key = `${digestId}|${clusterName}`;
           const isOpen = !!expanded[key];
+          const analysis = analyses.find((a) => a.cluster_name === clusterName);
           return (
             <div key={clusterName} className="border border-[var(--color-border)] rounded-md overflow-hidden">
               <button
@@ -98,6 +217,11 @@ function Section({
                   <ChevronRight className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
                 )}
                 <span className="text-sm font-semibold flex-1 truncate">{clusterName}</span>
+                {analysis && analysis.trend_streak >= 2 && (
+                  <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-300">
+                    {analysis.trend_streak}. Woche
+                  </span>
+                )}
                 {confidence && (
                   <span
                     className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded ${CONFIDENCE_COLORS[confidence]}`}
@@ -111,40 +235,16 @@ function Section({
               </button>
               {isOpen && (
                 <div className="px-3 pb-3 pt-1 border-t border-[var(--color-border)]">
-                  {items[0]?.summary && (
-                    <p className="text-sm text-[var(--color-fg)] mb-3 mt-2">{items[0].summary}</p>
+                  {analysis ? (
+                    <DeepAnalysisView analysis={analysis} items={items} />
+                  ) : (
+                    <>
+                      {items[0]?.summary && (
+                        <p className="text-sm text-[var(--color-fg)] mb-3 mt-2">{items[0].summary}</p>
+                      )}
+                      <ItemList items={items} />
+                    </>
                   )}
-                  <ul className="space-y-1.5">
-                    {items.map((item) => {
-                      const tier = (item.source_tier ?? 3) as 1 | 2 | 3;
-                      return (
-                        <li key={item.id} className="flex items-start gap-2">
-                          <span
-                            className={`shrink-0 mt-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[tier]}`}
-                            title={TIER_LABELS[tier]}
-                          >
-                            T{tier}
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <a
-                              href={item.source_url ?? "#"}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-sm text-[var(--color-accent)] hover:underline"
-                            >
-                              {item.title}
-                            </a>
-                            <div className="text-xs text-[var(--color-muted)] mt-0.5">
-                              {item.source_name}
-                              {item.published_at && (
-                                <span className="ml-2">· {formatRelative(item.published_at)}</span>
-                              )}
-                            </div>
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ul>
                 </div>
               )}
             </div>
@@ -361,6 +461,7 @@ export function Dashboard() {
                         if (confidence === "community") stimmungsbild.push(entry);
                         else fachmeinung.push(entry);
                       }
+                      const analyses = digest.cluster_analyses ?? [];
                       return (
                         <>
                           {fachmeinung.length > 0 && (
@@ -371,6 +472,7 @@ export function Dashboard() {
                               digestId={digest.id}
                               expanded={expanded}
                               toggle={toggleCluster}
+                              analyses={analyses}
                             />
                           )}
                           {stimmungsbild.length > 0 && (
@@ -381,6 +483,7 @@ export function Dashboard() {
                               digestId={digest.id}
                               expanded={expanded}
                               toggle={toggleCluster}
+                              analyses={analyses}
                               dimmed
                             />
                           )}

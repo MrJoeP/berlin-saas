@@ -49,6 +49,17 @@ export interface Competitor {
   url: string | null;
 }
 
+export interface ClusterAnalysis {
+  cluster_name: string;
+  confidence: "verified" | "editorial" | "community";
+  was_passiert: string;
+  warum_relevant: string;
+  industry_uneins: string;
+  action_woche: string[];
+  key_quotes: { quote: string; source: string; url: string }[];
+  trend_streak: number;
+}
+
 export interface Digest {
   id: string;
   company_id: string;
@@ -56,6 +67,7 @@ export interface Digest {
   title: string;
   generated_at: string;
   delivered_at: string | null;
+  cluster_analyses: ClusterAnalysis[] | null;
 }
 
 export interface DigestItem {

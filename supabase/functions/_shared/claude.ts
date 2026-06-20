@@ -1,13 +1,15 @@
 // Claude-API-Client für Edge Functions.
 // Default-Modell: Haiku 4.5 (schnell, günstig).
-// Für komplexere Tasks (Profile-Extraction, Clustering) kann auf Sonnet 4.6 hochgestuft werden.
-
-// TODO: ANTHROPIC_API_KEY in Supabase Vault setzen vor Tag 4.
-// Setup: supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+// Sonnet 4.6 für strukturierte Tasks (Profile, Clustering).
+// Opus 4.8 für Tiefen-Analyse mit Top-Qualität (Deep-Synthesis).
+//
+// Prompt-Caching: System-Prompts ab 1024 Tokens werden über cache_control "ephemeral"
+// für 5 Min gecached. Sparpotenzial bei wiederholten Calls im selben Run: ~90%.
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 const SONNET_MODEL = "claude-sonnet-4-6";
+const OPUS_MODEL = "claude-opus-4-8";
 
 export interface ClaudeMessage {
   role: "user" | "assistant";
@@ -17,6 +19,7 @@ export interface ClaudeMessage {
 export interface ClaudeCallOptions {
   model?: string;
   system?: string;
+  cacheSystem?: boolean; // Wenn true und system ≥1024 chars: Prompt-Caching aktivieren.
   messages: ClaudeMessage[];
   max_tokens?: number;
   temperature?: number;
@@ -27,12 +30,36 @@ export interface ClaudeResponse {
   usage: {
     input_tokens: number;
     output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
   };
 }
 
 export async function callClaude(options: ClaudeCallOptions): Promise<ClaudeResponse> {
   const key = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key) throw new Error("ANTHROPIC_API_KEY nicht gesetzt. Vault prüfen.");
+  if (!key) throw new Error("ANTHROPIC_API_KEY nicht gesetzt.");
+
+  // System-Prompt entweder als String oder mit cache_control übergeben.
+  let systemPayload: unknown = options.system;
+  if (options.cacheSystem && options.system && options.system.length >= 1024) {
+    systemPayload = [
+      { type: "text", text: options.system, cache_control: { type: "ephemeral" } },
+    ];
+  }
+
+  // Opus 4.8 supports no temperature parameter — nur für die anderen Modelle senden.
+  const model = options.model ?? DEFAULT_MODEL;
+  const supportsTemperature = !model.startsWith("claude-opus-4-8");
+
+  const body: Record<string, unknown> = {
+    model,
+    max_tokens: options.max_tokens ?? 2048,
+    system: systemPayload,
+    messages: options.messages,
+  };
+  if (supportsTemperature) {
+    body.temperature = options.temperature ?? 0;
+  }
 
   const response = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
@@ -41,13 +68,7 @@ export async function callClaude(options: ClaudeCallOptions): Promise<ClaudeResp
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
     },
-    body: JSON.stringify({
-      model: options.model ?? DEFAULT_MODEL,
-      max_tokens: options.max_tokens ?? 2048,
-      temperature: options.temperature ?? 0,
-      system: options.system,
-      messages: options.messages,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -66,6 +87,8 @@ export async function callClaude(options: ClaudeCallOptions): Promise<ClaudeResp
     usage: {
       input_tokens: data.usage.input_tokens,
       output_tokens: data.usage.output_tokens,
+      cache_creation_input_tokens: data.usage.cache_creation_input_tokens,
+      cache_read_input_tokens: data.usage.cache_read_input_tokens,
     },
   };
 }
@@ -76,9 +99,7 @@ export async function callClaudeJSON<T>(options: ClaudeCallOptions): Promise<T> 
     system: (options.system ?? "") +
       "\n\nResponse MUST be valid JSON only, no prose, no markdown fences.",
   });
-
   try {
-    // Manchmal kommt JSON in fences trotz Anweisung. Cleanup.
     const cleaned = response.content
       .replace(/^```json\s*/i, "")
       .replace(/^```\s*/i, "")
@@ -90,4 +111,4 @@ export async function callClaudeJSON<T>(options: ClaudeCallOptions): Promise<T> 
   }
 }
 
-export { DEFAULT_MODEL, SONNET_MODEL };
+export { DEFAULT_MODEL, SONNET_MODEL, OPUS_MODEL };
