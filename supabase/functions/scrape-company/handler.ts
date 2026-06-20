@@ -9,16 +9,35 @@ import { callClaudeJSON, SONNET_MODEL } from "../_shared/claude.ts";
 // Alternative: simpler fetch + cheerio-ähnliches Parsing in Deno.
 const FIRECRAWL_URL = "https://api.firecrawl.dev/v1/scrape";
 
-const PROFILE_SYSTEM_PROMPT = `Du extrahierst ein strukturiertes Marketing-Profil aus einer Firmen-Website.
-Halte dich an das vorgegebene JSON-Schema. Antworte nur mit JSON, keine Prosa.
+// Industrien-Liste muss synchron sein mit der industries-Tabelle.
+const INDUSTRIES = [
+  "AI Tools",
+  "B2B SaaS",
+  "DevTools",
+  "E-Commerce",
+  "FinTech",
+  "HR Tech",
+  "Marketing Tech",
+  "Productivity",
+];
+
+const PROFILE_SYSTEM_PROMPT = `Du extrahierst ein strukturiertes Marketing-Profil aus einer Firmen-Website
+plus eine Industrie-Klassifikation. Halte dich an das vorgegebene JSON-Schema.
+Antworte nur mit JSON, keine Prosa.
+
+Verfügbare Industries (wähle die beste Übereinstimmung, "Other" wenn nichts passt):
+${INDUSTRIES.join(", ")}, Other
 
 Schema:
 {
-  "tagline": "Eine prägnante One-Liner-Beschreibung der Firma.",
-  "value_props": ["Liste der wichtigsten Wertversprechen, max 5"],
+  "tagline": "Prägnante One-Liner-Beschreibung der Firma.",
+  "value_props": ["Wichtigste Wertversprechen, max 5"],
   "target_segments": ["Wer wird angesprochen, max 3"],
   "tone_signals": ["Wie klingt die Firma, z.B. 'developer-first', 'enterprise-formal'"],
-  "key_terms": ["Branchen-Vokabular oder Schlüsselbegriffe, max 10"]
+  "key_terms": ["Branchen-Vokabular, max 10"],
+  "industry": "Eine der vorgegebenen Industries",
+  "niche": "Konkrete Nische in 5 bis 10 Wörtern, z.B. 'HR-Tech für Mittelstand DACH'",
+  "keywords": ["3 bis 6 Keywords für News-Filter, einfache Begriffe ohne Sonderzeichen"]
 }`;
 
 export async function handle(job: Job, client: SupabaseClient): Promise<Record<string, unknown>> {
@@ -36,12 +55,52 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
   const markdown = await scrapeMarkdown(company.url);
   const profile = await extractProfile(markdown, company);
 
+  // Industrie nur setzen wenn sie aus der vordefinierten Liste kommt.
+  const validIndustry = INDUSTRIES.includes(profile.industry as string)
+    ? (profile.industry as string)
+    : null;
+
   await client
     .from("companies")
-    .update({ profile_json: profile })
+    .update({
+      profile_json: profile,
+      industry: company.industry ?? validIndustry,
+      niche: company.niche ?? (profile.niche as string | null),
+      keywords: company.keywords?.length
+        ? company.keywords
+        : ((profile.keywords as string[] | undefined) ?? []),
+      tagline: company.tagline ?? (profile.tagline as string | null),
+    })
     .eq("id", company.id);
 
-  // Konkurrenten parallel scrapen plus Profile bauen.
+  // Auto-Picking der Sources passend zur Industrie.
+  let sourcesAdded = 0;
+  if (validIndustry) {
+    const { data: existingSources } = await client
+      .from("company_sources")
+      .select("source_id")
+      .eq("company_id", company.id);
+
+    if (!existingSources || existingSources.length === 0) {
+      const { data: matchingSources } = await client
+        .from("sources")
+        .select("id")
+        .contains("industry_tags", [validIndustry])
+        .eq("is_default", true);
+
+      if (matchingSources && matchingSources.length > 0) {
+        const rows = matchingSources.map((s) => ({
+          company_id: company.id,
+          source_id: s.id,
+          active: true,
+        }));
+        await client.from("company_sources").insert(rows);
+        sourcesAdded = matchingSources.length;
+      }
+    }
+  }
+
+  // Konkurrenten — optional, scrape sie wenn vorhanden.
   const { data: competitors } = await client
     .from("competitors")
     .select("*")
@@ -63,7 +122,22 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
     }
   }
 
-  return { company_id: company.id, profile, competitors_scraped: competitors?.length ?? 0 };
+  // Direkt den ersten News-Scrape anstoßen damit ein Digest entsteht.
+  if (sourcesAdded > 0) {
+    await client.from("jobs").insert({
+      type: "niche_news_scrape",
+      company_id: company.id,
+      depends_on: [job.id],
+    });
+  }
+
+  return {
+    company_id: company.id,
+    profile,
+    industry: validIndustry,
+    sources_added: sourcesAdded,
+    competitors_scraped: competitors?.length ?? 0,
+  };
 }
 
 async function scrapeMarkdown(url: string): Promise<string> {

@@ -154,17 +154,16 @@ export function Dashboard() {
           <Card>
             <CardContent className="text-center py-12">
               <p className="text-sm text-[var(--color-fg)] mb-2">
-                Noch kein Digest vorhanden.
-              </p>
-              <p className="text-xs text-[var(--color-muted)] mb-1">
-                Unternehmen angelegt {formatDate(company.created_at)}.
+                {company.industry
+                  ? "Bot scraped Quellen und baut den ersten Digest. Dauert ein paar Minuten."
+                  : "Bot analysiert deine Website, klassifiziert die Industrie und picked Sources."}
               </p>
               <p className="text-xs text-[var(--color-muted)] mb-6">
-                Voraussetzung: ANTHROPIC_API_KEY und RESEND_API_KEY müssen als Supabase Secrets gesetzt sein.
+                Setup von {formatDate(company.created_at)}. Aktualisiere die Seite in 1 bis 2 Minuten.
               </p>
-              <Button onClick={triggerRun} disabled={triggering}>
-                {triggering ? "Job läuft..." : "Ersten Run starten"}
-                <ArrowRight className="w-4 h-4 ml-1" />
+              <Button variant="secondary" onClick={triggerRun} disabled={triggering}>
+                <ArrowRight className="w-4 h-4 mr-1" />
+                {triggering ? "Job läuft..." : "Manuell neu anstoßen"}
               </Button>
             </CardContent>
           </Card>
