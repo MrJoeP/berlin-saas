@@ -6,8 +6,14 @@ import { Button } from "@/components/ui/Button";
 import { Input, Label, Field } from "@/components/ui/Input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/Card";
 
-// Feste owner-ID für dieses Personal Tool (kein Login).
-const OWNER_ID = "00000000-0000-0000-0000-000000000001";
+function extractErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object") {
+    const e = err as { message?: string; details?: string; hint?: string; code?: string };
+    return [e.message, e.details, e.hint, e.code].filter(Boolean).join(" — ") || JSON.stringify(err);
+  }
+  return String(err);
+}
 
 export function Setup() {
   const navigate = useNavigate();
@@ -24,12 +30,7 @@ export function Setup() {
     try {
       const { data: company, error: companyErr } = await supabase
         .from("companies")
-        .insert({
-          user_id: OWNER_ID,
-          name,
-          url: url || null,
-          keywords: [],
-        })
+        .insert({ name, url: url || null, keywords: [] })
         .select()
         .single();
 
@@ -46,8 +47,7 @@ export function Setup() {
 
       navigate("/");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
+      setError(extractErrorMessage(err));
       setSubmitting(false);
     }
   }
