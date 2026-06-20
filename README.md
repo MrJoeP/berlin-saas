@@ -8,7 +8,8 @@
 
 ## STRUKTUR
 - `01_Niche-News-Digest_Setup/` und folgende: Specs und Notes pro Modul.
-- `supabase/`: geteilte Datenbank-Migrations und Edge Functions für alle Module.
+- `frontend/`: Vite + React + Tailwind Frontend mit Setup-Form und Dashboard.
+- `supabase/`: geteilte Datenbank-Migrations, Edge Functions und Seeds.
 - `prompts/`: geteilte LLM-Prompts.
 
 ## STACK
