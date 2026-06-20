@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowRight, RefreshCw, ChevronDown, ChevronRight } from "lucide-react";
 import {
   supabase,
   type Company,
@@ -59,11 +59,17 @@ function Section({
   title,
   hint,
   clusters,
+  digestId,
+  expanded,
+  toggle,
   dimmed = false,
 }: {
   title: string;
   hint: string;
   clusters: [string, DigestItem[]][];
+  digestId: string;
+  expanded: Record<string, boolean>;
+  toggle: (key: string) => void;
   dimmed?: boolean;
 }) {
   return (
@@ -74,57 +80,77 @@ function Section({
         </h2>
         <span className="text-[10px] text-[var(--color-muted)]">{hint}</span>
       </div>
-      {clusters.map(([clusterName, items]) => {
-        const confidence = items[0]?.cluster_confidence ?? null;
-        return (
-          <div key={clusterName} className="mb-5 last:mb-0">
-            <div className="flex items-center gap-2 mb-2">
-              <h3 className="text-sm font-semibold">{clusterName}</h3>
-              {confidence && (
-                <span
-                  className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${CONFIDENCE_COLORS[confidence]}`}
-                >
-                  {CONFIDENCE_LABELS[confidence]}
+      <div className="space-y-1">
+        {clusters.map(([clusterName, items]) => {
+          const confidence = items[0]?.cluster_confidence ?? null;
+          const key = `${digestId}|${clusterName}`;
+          const isOpen = !!expanded[key];
+          return (
+            <div key={clusterName} className="border border-[var(--color-border)] rounded-md overflow-hidden">
+              <button
+                type="button"
+                onClick={() => toggle(key)}
+                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--color-bg)] transition-colors text-left"
+              >
+                {isOpen ? (
+                  <ChevronDown className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
+                )}
+                <span className="text-sm font-semibold flex-1 truncate">{clusterName}</span>
+                {confidence && (
+                  <span
+                    className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded ${CONFIDENCE_COLORS[confidence]}`}
+                  >
+                    {CONFIDENCE_LABELS[confidence]}
+                  </span>
+                )}
+                <span className="shrink-0 text-xs text-[var(--color-muted)] tabular-nums">
+                  {items.length}
                 </span>
+              </button>
+              {isOpen && (
+                <div className="px-3 pb-3 pt-1 border-t border-[var(--color-border)]">
+                  {items[0]?.summary && (
+                    <p className="text-sm text-[var(--color-fg)] mb-3 mt-2">{items[0].summary}</p>
+                  )}
+                  <ul className="space-y-1.5">
+                    {items.map((item) => {
+                      const tier = (item.source_tier ?? 3) as 1 | 2 | 3;
+                      return (
+                        <li key={item.id} className="flex items-start gap-2">
+                          <span
+                            className={`shrink-0 mt-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[tier]}`}
+                            title={TIER_LABELS[tier]}
+                          >
+                            T{tier}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <a
+                              href={item.source_url ?? "#"}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm text-[var(--color-accent)] hover:underline"
+                            >
+                              {item.title}
+                            </a>
+                            <div className="text-xs text-[var(--color-muted)] mt-0.5">
+                              {item.source_name}
+                              {item.published_at && (
+                                <span className="ml-2">· {formatRelative(item.published_at)}</span>
+                              )}
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
               )}
             </div>
-            {items[0]?.summary && (
-              <p className="text-sm text-[var(--color-fg)] mb-3">{items[0].summary}</p>
-            )}
-            <ul className="space-y-1.5">
-              {items.map((item) => {
-                const tier = (item.source_tier ?? 3) as 1 | 2 | 3;
-                return (
-                  <li key={item.id} className="flex items-start gap-2">
-                    <span
-                      className={`shrink-0 mt-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[tier]}`}
-                      title={TIER_LABELS[tier]}
-                    >
-                      T{tier}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <a
-                        href={item.source_url ?? "#"}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-[var(--color-accent)] hover:underline"
-                      >
-                        {item.title}
-                      </a>
-                      <div className="text-xs text-[var(--color-muted)] mt-0.5">
-                        {item.source_name}
-                        {item.published_at && (
-                          <span className="ml-2">· {formatRelative(item.published_at)}</span>
-                        )}
-                      </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -142,6 +168,11 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
   const [activeFilter, setActiveFilter] = useState<DigestFilter>("all");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+
+  function toggleCluster(key: string) {
+    setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
+  }
 
   useEffect(() => {
     loadData();
@@ -337,6 +368,9 @@ export function Dashboard() {
                               title="Fachmeinung"
                               hint="Primärquellen und Industry-Pubs"
                               clusters={fachmeinung}
+                              digestId={digest.id}
+                              expanded={expanded}
+                              toggle={toggleCluster}
                             />
                           )}
                           {stimmungsbild.length > 0 && (
@@ -344,6 +378,9 @@ export function Dashboard() {
                               title="Stimmungsbild"
                               hint="Community-Diskussionen, ungeprüft"
                               clusters={stimmungsbild}
+                              digestId={digest.id}
+                              expanded={expanded}
+                              toggle={toggleCluster}
                               dimmed
                             />
                           )}
