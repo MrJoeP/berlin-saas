@@ -2,7 +2,6 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Field } from "@/components/ui/Input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/Card";
@@ -18,7 +17,6 @@ function extractErrorMessage(err: unknown): string {
 
 export function Setup() {
   const navigate = useNavigate();
-  const { session } = useAuth();
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -32,7 +30,7 @@ export function Setup() {
     try {
       const { data: company, error: companyErr } = await supabase
         .from("companies")
-        .insert({ user_id: session!.user.id, name, url: url || null, keywords: [] })
+        .insert({ name, url: url || null, keywords: [] })
         .select()
         .single();
 
