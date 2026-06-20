@@ -1,7 +1,6 @@
 // Bot: Clustering der News-Items, Digest-Generierung, Knowledge-Base-Updates.
 // Triggert: nach niche_news_scrape.
 // Schreibt: digests, digest_items, knowledge_entries.
-// Enqueued: niche_news_send.
 
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { Job, NewsItem, DigestCluster, Company } from "../_shared/types.ts";
@@ -100,23 +99,10 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
     await client.from("knowledge_entries").insert(knowledgeEntries);
   }
 
-  // 6. Send-Job enqueuen.
-  const { data: sendJob } = await client
-    .from("jobs")
-    .insert({
-      type: "niche_news_send",
-      company_id: company.id,
-      payload: { digest_id: digest.id },
-      depends_on: [job.id],
-    })
-    .select()
-    .single();
-
   return {
     digest_id: digest.id,
     clusters: enrichedClusters.length,
     items_total: digestItems.length,
-    send_job_id: sendJob?.id,
   };
 }
 
