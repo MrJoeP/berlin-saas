@@ -7,10 +7,11 @@
 - [10_WEEKS_ROADMAP.md](10_WEEKS_ROADMAP.md): Wochen-Plan mit Status pro Modul.
 
 ## STRUKTUR
-- `01_Niche-News-Digest_Setup/` und folgende: Specs und Notes pro Modul.
 - `frontend/`: Vite + React + Tailwind Frontend mit Setup-Form und Dashboard.
 - `supabase/`: geteilte Datenbank-Migrations, Edge Functions und Seeds.
 - `prompts/`: geteilte LLM-Prompts.
+
+Modul-Specs (Tagespläne, Source-Listen, LinkedIn-Posts) leben außerhalb des Repos im Parent-Folder unter `Projekt 1/`, `Projekt 2/` etc. UI/UX-Material liegt parallel unter `UI_UX/`.
 
 ## STACK
 - Frontend: Lovable.

@@ -1,5 +1,11 @@
 # Nacht-Auftrag für Claude Code
 
+**DEPRECATED.** Schema, Worker, Bot-Skelette plus Frontend wurden im Interactive-Mode am 2026-06-15/06-20 fertiggestellt. Diese Datei bleibt als historische Referenz erhalten.
+
+Modul-Specs liegen ab jetzt unter `../Projekt 1/` (parallel zum Repo), nicht mehr unter `01_Niche-News-Digest_Setup/`.
+
+---
+
 Du bist Claude Code in einem autonomen Nacht-Run. Working Directory: `/Users/dariopilipovic/Berlin SaaS/Berlin SaaS`.
 
 ## ZIEL
