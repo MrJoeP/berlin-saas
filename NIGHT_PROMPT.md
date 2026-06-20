@@ -36,43 +36,11 @@ Bevor du startest, lies in dieser Reihenfolge und verinnerliche:
 ## TASK-LISTE IN REIHENFOLGE
 
 ### BLOCK A: SCHEMA-MIGRATIONS
-A1. `supabase/migrations/003_companies_competitors.sql`
-- companies (siehe SCHEMA.md), inkl. profile_json, active boolean default true.
-- competitors (siehe SCHEMA.md).
-- Indexe und Comments.
+**Status: ERLEDIGT vor Nacht-Run.** Migrations 001 bis 008 sind bereits live in der Supabase-Datenbank und als Files im Repo. Tables: industries, sources, companies, competitors, jobs, digests, digest_items, knowledge_entries, company_sources. Alle RLS-enabled.
 
-A2. `supabase/migrations/004_jobs.sql`
-- jobs-Tabelle exakt wie in ORCHESTRATOR.md spezifiziert.
-- Indexe: status plus scheduled_for, company_id, type.
-- Comments auf Tabelle und Spalten.
+Wenn du diesen Block siehst, prüfe nur kurz, ob alle Files in `supabase/migrations/` liegen und ob ihre Inhalte mit ORCHESTRATOR.md und SCHEMA.md konsistent sind. Überspringe Schema-Generierung.
 
-A3. `supabase/migrations/005_digests_digest_items.sql`
-- digests mit type-Enum (niche_news, top_post, competitor, ugc).
-- digest_items mit cluster, summary, embedding vector(1536).
-- ivfflat-Index auf embedding.
-
-A4. `supabase/migrations/006_knowledge_entries.sql`
-- knowledge_entries als generische Tabelle für alle späteren Module.
-- Spalten: type, content, metadata jsonb, embedding vector(1536), company_id.
-- ivfflat-Index auf embedding.
-
-A5. `supabase/migrations/007_company_sources.sql`
-- Junction-Table company_sources(company_id, source_id, active).
-- Primary key composite.
-
-A6. `supabase/migrations/008_rls_policies.sql`
-- RLS aktivieren auf: companies, competitors, digests, digest_items, knowledge_entries, company_sources, jobs.
-- User sieht nur eigene Records (via companies.user_id Joins).
-- Service-Role hat Voll-Zugriff (default).
-- industries und sources bleiben read-only für alle eingeloggten User.
-
-A7. `supabase/migrations/009_cron_jobs.sql`
-- cron.schedule für 'worker-tick' jede Minute.
-- cron.schedule für 'weekly-niche-news' Montag 6 Uhr UTC.
-- Verwende `<PROJECT_REF>` Platzhalter im http_post URL, mit Kommentar wo dieser ersetzt werden muss.
-- Verwende `<SERVICE_ROLE_KEY>` Platzhalter, mit TODO-Kommentar.
-
-Commit nach jedem Migration-File. Commit-Message Format: `feat(db): migration 00X <kurzbeschreibung>`.
+Migration 009 (cron jobs) ist NICHT erledigt. Sie wird im Nacht-Run noch NICHT angewendet, weil Service-Role-Key plus Supabase-Vault-Setup eine bewusste Entscheidung des Founders sind. Schreibe stattdessen einen Code-Draft als `supabase/migrations/009_cron_jobs.sql` mit Platzhaltern `<PROJECT_REF>` und `<SERVICE_ROLE_KEY>` plus TODO-Kommentaren. Nicht via `apply_migration` ausführen.
 
 ### BLOCK B: EDGE-FUNCTION-SHARED-LAYER
 B1. `supabase/functions/_shared/supabase.ts`
