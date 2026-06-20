@@ -75,11 +75,13 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
 
   // Auto-Picking der Sources passend zur Industrie.
   let sourcesAdded = 0;
+  let existingSources: { source_id: string }[] | null = null;
   if (validIndustry) {
-    const { data: existingSources } = await client
+    const res = await client
       .from("company_sources")
       .select("source_id")
       .eq("company_id", company.id);
+    existingSources = res.data;
 
     if (!existingSources || existingSources.length === 0) {
       const { data: matchingSources } = await client
@@ -100,30 +102,28 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
     }
   }
 
-  // Konkurrenten — optional, scrape sie wenn vorhanden.
+  // Konkurrenten — optional, parallel scrapen wenn vorhanden.
   const { data: competitors } = await client
     .from("competitors")
     .select("*")
     .eq("company_id", company.id);
 
   if (competitors && competitors.length > 0) {
-    for (const competitor of competitors) {
-      if (!competitor.url) continue;
-      try {
-        const compMarkdown = await scrapeMarkdown(competitor.url);
-        const compProfile = await extractProfile(compMarkdown, competitor as unknown as Company);
-        await client
-          .from("competitors")
-          .update({ profile_json: compProfile })
-          .eq("id", competitor.id);
-      } catch (err) {
-        console.error(`Competitor ${competitor.id} scrape failed:`, err);
-      }
-    }
+    await Promise.allSettled(
+      competitors
+        .filter((c) => !!c.url)
+        .map(async (competitor) => {
+          const compMarkdown = await scrapeMarkdown(competitor.url!);
+          const compProfile = await extractProfile(compMarkdown, competitor as unknown as Company);
+          await client.from("competitors").update({ profile_json: compProfile }).eq("id", competitor.id);
+        }),
+    );
   }
 
-  // Direkt den ersten News-Scrape anstoßen damit ein Digest entsteht.
-  if (sourcesAdded > 0) {
+  // Direkt den ersten News-Scrape anstoßen — auch wenn keine NEUEN Sources gepickt wurden,
+  // solange überhaupt welche aktiv sind.
+  const hasAnySources = sourcesAdded > 0 || (existingSources && existingSources.length > 0);
+  if (hasAnySources) {
     await client.from("jobs").insert({
       type: "niche_news_scrape",
       company_id: company.id,
@@ -143,13 +143,24 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
 async function scrapeMarkdown(url: string): Promise<string> {
   const key = Deno.env.get("FIRECRAWL_API_KEY");
 
-  // Fallback: simpler fetch wenn Firecrawl nicht konfiguriert.
+  // Fallback: simpler fetch wenn Firecrawl nicht konfiguriert. Mit AbortController-Timeout (15s).
   if (!key) {
     console.warn("FIRECRAWL_API_KEY nicht gesetzt, nutze simpler fetch fallback.");
-    const response = await fetch(url, { headers: { "user-agent": "berlin-saas-bot/1.0" } });
-    if (!response.ok) throw new Error(`Fetch ${url} failed: ${response.status}`);
-    const html = await response.text();
-    return stripHtmlSimple(html).slice(0, 30000);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      const response = await fetch(url, {
+        headers: { "user-agent": "berlin-saas-bot/1.0" },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!response.ok) throw new Error(`Fetch ${url} failed: ${response.status}`);
+      const html = await response.text();
+      return stripHtmlSimple(html).slice(0, 30000);
+    } catch (err) {
+      clearTimeout(timeout);
+      throw err;
+    }
   }
 
   const response = await fetch(FIRECRAWL_URL, {

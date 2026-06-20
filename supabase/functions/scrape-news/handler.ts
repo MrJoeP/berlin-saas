@@ -160,9 +160,21 @@ async function fetchSource(source: Source): Promise<NewsItem[]> {
 
 async function fetchRss(source: Source): Promise<NewsItem[]> {
   if (!source.url) return [];
-  const response = await fetch(source.url, { headers: { "user-agent": "berlin-saas-bot/1.0" } });
-  if (!response.ok) throw new Error(`RSS ${source.url} failed: ${response.status}`);
-  const xml = await response.text();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  let xml: string;
+  try {
+    const response = await fetch(source.url, {
+      headers: { "user-agent": "berlin-saas-bot/1.0" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!response.ok) throw new Error(`RSS ${source.url} failed: ${response.status}`);
+    xml = await response.text();
+  } catch (err) {
+    clearTimeout(timeout);
+    throw err;
+  }
   const items: NewsItem[] = [];
   const itemRegex = /<item[\s\S]*?<\/item>|<entry[\s\S]*?<\/entry>/gi;
   const titleRegex = /<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i;

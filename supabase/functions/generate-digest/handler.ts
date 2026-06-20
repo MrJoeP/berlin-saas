@@ -42,12 +42,13 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
   if (companyErr || !company) throw new Error(`Company ${job.company_id} nicht gefunden.`);
 
   const clusters = await clusterItems(items, company);
-  const enrichedClusters: (DigestCluster & { confidence: Confidence })[] = [];
-  for (const cluster of clusters) {
-    const confidence = computeConfidence(cluster.items);
-    const summary = await summarizeCluster(cluster, confidence);
-    enrichedClusters.push({ ...cluster, summary, confidence });
-  }
+  const enrichedClusters = await Promise.all(
+    clusters.map(async (cluster) => {
+      const confidence = computeConfidence(cluster.items);
+      const summary = await summarizeCluster(cluster, confidence);
+      return { ...cluster, summary, confidence };
+    }),
+  );
 
   const title = `Niche-News-Digest, ${new Date().toLocaleDateString("de-DE")}`;
   const { data: digest, error: digestErr } = await client
@@ -85,7 +86,8 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
     },
   }));
   if (knowledgeEntries.length > 0) {
-    await client.from("knowledge_entries").insert(knowledgeEntries);
+    const { error: knowledgeErr } = await client.from("knowledge_entries").insert(knowledgeEntries);
+    if (knowledgeErr) console.error("knowledge_entries insert failed:", knowledgeErr.message);
   }
 
   return {

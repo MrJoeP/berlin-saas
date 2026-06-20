@@ -44,7 +44,7 @@ export async function callClaude(options: ClaudeCallOptions): Promise<ClaudeResp
     body: JSON.stringify({
       model: options.model ?? DEFAULT_MODEL,
       max_tokens: options.max_tokens ?? 2048,
-      temperature: options.temperature ?? 0.7,
+      temperature: options.temperature ?? 0,
       system: options.system,
       messages: options.messages,
     }),
