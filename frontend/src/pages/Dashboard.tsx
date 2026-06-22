@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, RefreshCw, ChevronDown, ChevronRight, ArrowBigUp, ArrowBigDown, Plus } from "lucide-react";
+import { ArrowRight, RefreshCw, ChevronDown, ChevronRight, ArrowBigUp, ArrowBigDown, Plus, LogOut } from "lucide-react";
 import {
   supabase,
   type Company,
   type Digest,
   type DigestItem,
   type ClusterAnalysis,
-  type ClusterVote,
+  type Vote,
 } from "@/lib/supabase";
+import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/Button";
 import {
   Card,
@@ -70,32 +71,40 @@ function detectPlatform(sourceName: string | null): string {
   return sourceName;
 }
 
-function ItemRow({ item, onVote }: { item: DigestItem; onVote: (id: string, dir: "up" | "down") => void }) {
+function ItemRow({
+  item,
+  onVote,
+  myVote,
+}: {
+  item: DigestItem;
+  onVote: (id: string, dir: "up" | "down") => void;
+  myVote: -1 | 1 | undefined;
+}) {
   const tier = (item.source_tier ?? 3) as 1 | 2 | 3;
-  const score = (item.upvotes ?? 0) - (item.downvotes ?? 0);
   return (
     <li className="flex items-start gap-2 group">
       <div className="shrink-0 mt-0.5 flex flex-col items-center justify-center w-7">
         <button
           type="button"
           onClick={() => onVote(item.id, "up")}
-          className="p-0.5 rounded hover:bg-emerald-50 transition-colors text-[var(--color-muted)] hover:text-emerald-600"
-          title="Upvote"
+          className={`p-0.5 rounded transition-colors ${
+            myVote === 1
+              ? "bg-emerald-100 text-emerald-700"
+              : "text-[var(--color-muted)] hover:bg-emerald-50 hover:text-emerald-600"
+          }`}
+          title={myVote === 1 ? "Upvote entfernen" : "Upvote"}
         >
           <ArrowBigUp className="w-4 h-4" />
         </button>
-        <span
-          className={`text-[10px] font-medium tabular-nums leading-tight ${
-            score > 0 ? "text-emerald-600" : score < 0 ? "text-red-600" : "text-[var(--color-muted)]"
-          }`}
-        >
-          {score > 0 ? `+${score}` : score}
-        </span>
         <button
           type="button"
           onClick={() => onVote(item.id, "down")}
-          className="p-0.5 rounded hover:bg-red-50 transition-colors text-[var(--color-muted)] hover:text-red-600"
-          title="Downvote"
+          className={`p-0.5 rounded transition-colors mt-0.5 ${
+            myVote === -1
+              ? "bg-red-100 text-red-700"
+              : "text-[var(--color-muted)] hover:bg-red-50 hover:text-red-600"
+          }`}
+          title={myVote === -1 ? "Downvote entfernen" : "Downvote"}
         >
           <ArrowBigDown className="w-4 h-4" />
         </button>
@@ -126,15 +135,40 @@ function ItemRow({ item, onVote }: { item: DigestItem; onVote: (id: string, dir:
   );
 }
 
-function ItemList({ items, onVote }: { items: DigestItem[]; onVote: (id: string, dir: "up" | "down") => void }) {
+function ItemList({
+  items,
+  onVote,
+  votes,
+}: {
+  items: DigestItem[];
+  onVote: (id: string, dir: "up" | "down") => void;
+  votes: Record<string, -1 | 1>;
+}) {
   return (
     <ul className="space-y-1.5">
-      {items.map((item) => <ItemRow key={item.id} item={item} onVote={onVote} />)}
+      {items.map((item) => (
+        <ItemRow
+          key={item.id}
+          item={item}
+          onVote={onVote}
+          myVote={votes[`item:${item.id}`]}
+        />
+      ))}
     </ul>
   );
 }
 
-function DeepAnalysisView({ analysis, items, onVote }: { analysis: ClusterAnalysis; items: DigestItem[]; onVote: (id: string, dir: "up" | "down") => void }) {
+function DeepAnalysisView({
+  analysis,
+  items,
+  onVote,
+  votes,
+}: {
+  analysis: ClusterAnalysis;
+  items: DigestItem[];
+  onVote: (id: string, dir: "up" | "down") => void;
+  votes: Record<string, -1 | 1>;
+}) {
   return (
     <div className="pt-3 space-y-4">
       <div>
@@ -175,7 +209,7 @@ function DeepAnalysisView({ analysis, items, onVote }: { analysis: ClusterAnalys
           Alle Quellen ({items.length})
         </summary>
         <div className="mt-2">
-          <ItemList items={items} onVote={onVote} />
+          <ItemList items={items} onVote={onVote} votes={votes} />
         </div>
       </details>
     </div>
@@ -190,12 +224,14 @@ function CommunitySection({
   expanded,
   toggle,
   onVote,
+  votes,
 }: {
   items: DigestItem[];
   digestId: string;
   expanded: Record<string, boolean>;
   toggle: (key: string) => void;
   onVote: (id: string, dir: "up" | "down") => void;
+  votes: Record<string, -1 | 1>;
 }) {
   const byPlatform: Record<string, DigestItem[]> = {};
   for (const item of items) {
@@ -203,11 +239,13 @@ function CommunitySection({
     if (!byPlatform[platform]) byPlatform[platform] = [];
     byPlatform[platform].push(item);
   }
-  // Sort: höchstes Upvote-Total zuerst, dann nach Item-Anzahl.
+  // Sort: höchstes Netto-Voting zuerst (Summe meiner Votes für Items dieser Plattform), dann Item-Anzahl.
+  const platformScore = (items: DigestItem[]) =>
+    items.reduce((s, i) => s + (votes[`item:${i.id}`] ?? 0), 0);
   const entries = Object.entries(byPlatform).sort((a, b) => {
-    const upA = a[1].reduce((s, i) => s + (i.upvotes ?? 0), 0);
-    const upB = b[1].reduce((s, i) => s + (i.upvotes ?? 0), 0);
-    if (upA !== upB) return upB - upA;
+    const sA = platformScore(a[1]);
+    const sB = platformScore(b[1]);
+    if (sA !== sB) return sB - sA;
     return b[1].length - a[1].length;
   });
   return (
@@ -224,7 +262,7 @@ function CommunitySection({
         {entries.map(([platform, platformItems]) => {
           const key = `${digestId}|community|${platform}`;
           const isOpen = !!expanded[key];
-          const upvoteTotal = platformItems.reduce((s, i) => s + (i.upvotes ?? 0), 0);
+          const score = platformScore(platformItems);
           return (
             <div key={platform} className="border border-[var(--color-border)] rounded-md overflow-hidden">
               <button
@@ -238,9 +276,13 @@ function CommunitySection({
                   <ChevronRight className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
                 )}
                 <span className="text-sm font-semibold flex-1 truncate">{platform}</span>
-                {upvoteTotal > 0 && (
-                  <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-orange-100 text-orange-800">
-                    ▲ {upvoteTotal}
+                {score !== 0 && (
+                  <span
+                    className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                      score > 0 ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
+                    }`}
+                  >
+                    {score > 0 ? `▲ +${score}` : `▼ ${score}`}
                   </span>
                 )}
                 <span className="shrink-0 text-xs text-[var(--color-muted)] tabular-nums">
@@ -251,11 +293,12 @@ function CommunitySection({
                 <div className="px-3 pb-3 pt-2 border-t border-[var(--color-border)]">
                   <ItemList
                     items={[...platformItems].sort((a, b) => {
-                      const sa = (a.upvotes ?? 0) - (a.downvotes ?? 0);
-                      const sb = (b.upvotes ?? 0) - (b.downvotes ?? 0);
+                      const sa = votes[`item:${a.id}`] ?? 0;
+                      const sb = votes[`item:${b.id}`] ?? 0;
                       return sb - sa;
                     })}
                     onVote={onVote}
+                    votes={votes}
                   />
                 </div>
               )}
@@ -276,7 +319,7 @@ function Section({
   toggle,
   analyses,
   onVote,
-  clusterVotes,
+  votes,
   onVoteCluster,
   dimmed = false,
 }: {
@@ -288,7 +331,7 @@ function Section({
   toggle: (key: string) => void;
   analyses: ClusterAnalysis[];
   onVote: (id: string, dir: "up" | "down") => void;
-  clusterVotes: Record<string, ClusterVote>;
+  votes: Record<string, -1 | 1>;
   onVoteCluster: (digestId: string, clusterName: string, dir: "up" | "down") => void;
   dimmed?: boolean;
 }) {
@@ -306,8 +349,7 @@ function Section({
           const key = `${digestId}|${clusterName}`;
           const isOpen = !!expanded[key];
           const analysis = analyses.find((a) => a.cluster_name === clusterName);
-          const cv = clusterVotes[key];
-          const clusterScore = (cv?.upvotes ?? 0) - (cv?.downvotes ?? 0);
+          const myClusterVote = votes[`cluster:${digestId}|${clusterName}`];
           return (
             <div key={clusterName} className="border border-[var(--color-border)] rounded-md overflow-hidden">
               <div className="flex items-stretch">
@@ -342,27 +384,24 @@ function Section({
                   <button
                     type="button"
                     onClick={() => onVoteCluster(digestId, clusterName, "up")}
-                    className="px-2 py-2 hover:bg-emerald-50 transition-colors text-[var(--color-muted)] hover:text-emerald-600"
-                    title="Thema upvoten"
+                    className={`px-2 py-2 transition-colors ${
+                      myClusterVote === 1
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "text-[var(--color-muted)] hover:bg-emerald-50 hover:text-emerald-600"
+                    }`}
+                    title={myClusterVote === 1 ? "Upvote entfernen" : "Thema upvoten"}
                   >
                     <ArrowBigUp className="w-4 h-4" />
                   </button>
-                  <span
-                    className={`px-1 text-xs font-medium tabular-nums w-7 text-center ${
-                      clusterScore > 0
-                        ? "text-emerald-600"
-                        : clusterScore < 0
-                          ? "text-red-600"
-                          : "text-[var(--color-muted)]"
-                    }`}
-                  >
-                    {clusterScore > 0 ? `+${clusterScore}` : clusterScore}
-                  </span>
                   <button
                     type="button"
                     onClick={() => onVoteCluster(digestId, clusterName, "down")}
-                    className="px-2 py-2 hover:bg-red-50 transition-colors text-[var(--color-muted)] hover:text-red-600"
-                    title="Thema downvoten"
+                    className={`px-2 py-2 transition-colors ${
+                      myClusterVote === -1
+                        ? "bg-red-100 text-red-700"
+                        : "text-[var(--color-muted)] hover:bg-red-50 hover:text-red-600"
+                    }`}
+                    title={myClusterVote === -1 ? "Downvote entfernen" : "Thema downvoten"}
                   >
                     <ArrowBigDown className="w-4 h-4" />
                   </button>
@@ -371,13 +410,13 @@ function Section({
               {isOpen && (
                 <div className="px-3 pb-3 pt-1 border-t border-[var(--color-border)]">
                   {analysis ? (
-                    <DeepAnalysisView analysis={analysis} items={items} onVote={onVote} />
+                    <DeepAnalysisView analysis={analysis} items={items} onVote={onVote} votes={votes} />
                   ) : (
                     <>
                       {items[0]?.summary && (
                         <p className="text-sm text-[var(--color-fg)] mb-3 mt-2">{items[0].summary}</p>
                       )}
-                      <ItemList items={items} onVote={onVote} />
+                      <ItemList items={items} onVote={onVote} votes={votes} />
                     </>
                   )}
                 </div>
@@ -405,52 +444,55 @@ export function Dashboard() {
   const [triggering, setTriggering] = useState(false);
   const [activeFilter, setActiveFilter] = useState<DigestFilter>("all");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [clusterVotes, setClusterVotes] = useState<Record<string, ClusterVote>>({});
+  // Map<target_type:target_id, vote-value (-1 oder +1)>
+  const [votes, setVotes] = useState<Record<string, -1 | 1>>({});
+  const { session, signOut } = useAuth();
 
   function toggleCluster(key: string) {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
-  function clusterKey(digestId: string, clusterName: string) {
-    return `${digestId}|${clusterName}`;
+  function voteKey(targetType: "item" | "cluster", targetId: string) {
+    return `${targetType}:${targetId}`;
   }
 
-  async function voteItem(itemId: string, direction: "up" | "down") {
-    const field = direction === "up" ? "upvotes" : "downvotes";
-    // Optimistic UI Update.
-    let nextValue = 0;
-    setDigests((prev) =>
-      prev.map((d) => ({
-        ...d,
-        items: d.items.map((it) => {
-          if (it.id !== itemId) return it;
-          nextValue = (it[field] ?? 0) + 1;
-          return { ...it, [field]: nextValue };
-        }),
-      })),
-    );
-    await supabase.from("digest_items").update({ [field]: nextValue }).eq("id", itemId);
+  // Single-Vote Toggle-Logik:
+  //   Aktuell kein Vote → setze direction
+  //   Aktuell selbe direction → lösche (undo)
+  //   Aktuell andere direction → flip auf direction
+  async function castVote(targetType: "item" | "cluster", targetId: string, direction: "up" | "down") {
+    if (!session?.user.id) return;
+    const newValue: -1 | 1 = direction === "up" ? 1 : -1;
+    const key = voteKey(targetType, targetId);
+    const current = votes[key];
+
+    if (current === newValue) {
+      // Toggle off: delete vote
+      setVotes((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      await supabase
+        .from("votes")
+        .delete()
+        .eq("user_id", session.user.id)
+        .eq("target_type", targetType)
+        .eq("target_id", targetId);
+    } else {
+      // Set or flip
+      setVotes((prev) => ({ ...prev, [key]: newValue }));
+      await supabase.from("votes").upsert(
+        { user_id: session.user.id, target_type: targetType, target_id: targetId, value: newValue },
+        { onConflict: "user_id,target_type,target_id" },
+      );
+    }
   }
 
-  async function voteCluster(digestId: string, clusterName: string, direction: "up" | "down") {
-    const key = clusterKey(digestId, clusterName);
-    const current = clusterVotes[key] ?? { digest_id: digestId, cluster_name: clusterName, upvotes: 0, downvotes: 0 };
-    const field = direction === "up" ? "upvotes" : "downvotes";
-    const next = { ...current, [field]: current[field] + 1 };
-    // Optimistic UI Update.
-    setClusterVotes((prev) => ({ ...prev, [key]: next }));
-    // Upsert in DB.
-    await supabase.from("digest_cluster_votes").upsert(
-      {
-        digest_id: digestId,
-        cluster_name: clusterName,
-        upvotes: next.upvotes,
-        downvotes: next.downvotes,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "digest_id,cluster_name" },
-    );
-  }
+  const voteItem = (itemId: string, direction: "up" | "down") =>
+    castVote("item", itemId, direction);
+  const voteCluster = (digestId: string, clusterName: string, direction: "up" | "down") =>
+    castVote("cluster", `${digestId}|${clusterName}`, direction);
 
   useEffect(() => {
     loadData();
@@ -497,22 +539,23 @@ export function Dashboard() {
       );
       setDigests(enriched);
 
-      // Cluster-Votes für alle Digests bulk laden.
-      const digestIds = enriched.map((d) => d.id);
-      if (digestIds.length > 0) {
-        const { data: votes } = await supabase
-          .from("digest_cluster_votes")
-          .select("*")
-          .in("digest_id", digestIds);
-        const map: Record<string, ClusterVote> = {};
-        for (const v of (votes ?? []) as ClusterVote[]) {
-          map[`${v.digest_id}|${v.cluster_name}`] = v;
-        }
-        setClusterVotes(map);
-      }
+      await loadVotes();
     }
 
     setLoading(false);
+  }
+
+  async function loadVotes() {
+    if (!session?.user.id) return;
+    const { data: voteRows } = await supabase
+      .from("votes")
+      .select("target_type, target_id, value")
+      .eq("user_id", session.user.id);
+    const map: Record<string, -1 | 1> = {};
+    for (const v of (voteRows ?? []) as Vote[]) {
+      map[`${v.target_type}:${v.target_id}`] = v.value;
+    }
+    setVotes(map);
   }
 
   async function switchCompany(newCompany: Company) {
@@ -533,18 +576,7 @@ export function Dashboard() {
         }),
       );
       setDigests(enriched);
-      const digestIds = enriched.map((d) => d.id);
-      if (digestIds.length > 0) {
-        const { data: votes } = await supabase
-          .from("digest_cluster_votes").select("*").in("digest_id", digestIds);
-        const map: Record<string, ClusterVote> = {};
-        for (const v of (votes ?? []) as ClusterVote[]) {
-          map[`${v.digest_id}|${v.cluster_name}`] = v;
-        }
-        setClusterVotes(map);
-      } else {
-        setClusterVotes({});
-      }
+      await loadVotes();
     }
     setLoading(false);
   }
@@ -628,6 +660,9 @@ export function Dashboard() {
             <Button variant="secondary" size="sm" onClick={triggerRun} disabled={triggering}>
               <RefreshCw className={`w-4 h-4 mr-1 ${triggering ? "animate-spin" : ""}`} />
               {triggering ? "Triggered..." : "Run now"}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={signOut} title="Logout">
+              <LogOut className="w-4 h-4" />
             </Button>
           </div>
         </div>
@@ -738,7 +773,7 @@ export function Dashboard() {
                               toggle={toggleCluster}
                               analyses={analyses}
                               onVote={voteItem}
-                              clusterVotes={clusterVotes}
+                              votes={votes}
                               onVoteCluster={voteCluster}
                             />
                           )}
@@ -749,6 +784,7 @@ export function Dashboard() {
                               expanded={expanded}
                               toggle={toggleCluster}
                               onVote={voteItem}
+                              votes={votes}
                             />
                           )}
                         </>

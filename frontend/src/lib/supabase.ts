@@ -78,13 +78,12 @@ export interface DigestItem {
   source_tier: 1 | 2 | 3 | null;
   cluster_confidence: "verified" | "editorial" | "community" | null;
   published_at: string | null;
-  upvotes: number;
-  downvotes: number;
 }
 
-export interface ClusterVote {
-  digest_id: string;
-  cluster_name: string;
-  upvotes: number;
-  downvotes: number;
+// Vote in unified votes-Tabelle. value ist +1 oder -1, eindeutig pro user+target.
+export interface Vote {
+  user_id: string;
+  target_type: "item" | "cluster";
+  target_id: string; // item.id oder `${digest_id}|${cluster_name}`
+  value: -1 | 1;
 }

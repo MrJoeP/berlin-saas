@@ -6,33 +6,27 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 
 export function Login() {
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"login" | "signup">("login");
-  const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
-    setStatus("loading");
+    setStatus("sending");
     setError(null);
 
-    if (mode === "login") {
-      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
-      if (signInError) {
-        setStatus("error");
-        setError(signInError.message);
-      }
-    } else {
-      const { error: signUpError } = await supabase.auth.signUp({ email, password });
-      if (signUpError) {
-        setStatus("error");
-        setError(signUpError.message);
-      } else {
-        setMode("login");
-        setStatus("idle");
-        setError("Account erstellt. Jetzt einloggen.");
-      }
+    const { error: signInError } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+
+    if (signInError) {
+      setStatus("error");
+      setError(signInError.message);
+      return;
     }
+    setStatus("sent");
   }
 
   return (
@@ -43,61 +37,35 @@ export function Login() {
           <CardDescription>10 weeks. 10 AI tools for founders.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onSubmit} className="space-y-4">
-            <Field>
-              <Label htmlFor="email" required>Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="du@deinedomain.com"
-                required
-                autoFocus
-              />
-            </Field>
-
-            <Field>
-              <Label htmlFor="password" required>Passwort</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-                minLength={6}
-              />
-            </Field>
-
-            {error && (
-              <p className="text-xs text-[var(--color-danger)]">{error}</p>
-            )}
-
-            <Button type="submit" size="lg" className="w-full" disabled={status === "loading"}>
-              {status === "loading"
-                ? "..."
-                : mode === "login"
-                ? "Einloggen"
-                : "Account erstellen"}
-            </Button>
-
-            <p className="text-xs text-center text-[var(--color-muted)]">
-              {mode === "login" ? (
-                <>Noch kein Account?{" "}
-                  <button type="button" onClick={() => { setMode("signup"); setError(null); }} className="underline">
-                    Registrieren
-                  </button>
-                </>
-              ) : (
-                <>Bereits registriert?{" "}
-                  <button type="button" onClick={() => { setMode("login"); setError(null); }} className="underline">
-                    Einloggen
-                  </button>
-                </>
-              )}
-            </p>
-          </form>
+          {status === "sent" ? (
+            <div className="text-center py-4">
+              <p className="text-sm text-[var(--color-fg)] mb-2">
+                Magic Link gesendet.
+              </p>
+              <p className="text-xs text-[var(--color-muted)]">
+                Schau in dein Postfach (inkl. Spam) und klick den Link.
+              </p>
+            </div>
+          ) : (
+            <form onSubmit={onSubmit} className="space-y-4">
+              <Field hint="Wir schicken dir einen Magic-Link zum direkten Einloggen — kein Passwort nötig.">
+                <Label htmlFor="email" required>Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="du@deinedomain.com"
+                  required
+                  autoFocus
+                />
+              </Field>
+              {error && <p className="text-xs text-[var(--color-danger)]">{error}</p>}
+              <Button type="submit" size="lg" className="w-full" disabled={status === "sending"}>
+                {status === "sending" ? "Sende Link..." : "Magic Link senden"}
+              </Button>
+            </form>
+          )}
         </CardContent>
       </Card>
     </div>
