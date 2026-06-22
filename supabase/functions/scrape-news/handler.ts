@@ -13,8 +13,8 @@
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { Job, NewsItem, Source } from "../_shared/types.ts";
 
-const MAX_RAW_ITEMS_PER_SOURCE = 50;
-const MAX_FILTERED_ITEMS = 150;
+const MAX_RAW_ITEMS_PER_SOURCE = 100;
+const MAX_FILTERED_ITEMS = 250;
 
 export async function handle(job: Job, client: SupabaseClient): Promise<Record<string, unknown>> {
   if (!job.company_id) throw new Error("niche_news_scrape benötigt company_id.");

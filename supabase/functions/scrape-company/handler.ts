@@ -30,6 +30,7 @@ ${INDUSTRIES.join(", ")}, Other
 
 Schema:
 {
+  "company_name": "Offizieller Firmen-Name aus der Website (z.B. 'Buzzmatic GmbH', 'Acme Labs')",
   "tagline": "Prägnante One-Liner-Beschreibung der Firma.",
   "value_props": ["Wichtigste Wertversprechen, max 5"],
   "target_segments": ["Wer wird angesprochen, max 3"],
@@ -60,10 +61,16 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
     ? (profile.industry as string)
     : null;
 
+  // Name aus Profil ableiten wenn der initiale Name nur die URL-Domain war.
+  const looksLikeDomain = company.name && /^[a-z0-9-]+\.[a-z]{2,}/i.test(company.name);
+  const profileName = typeof profile.company_name === "string" ? profile.company_name : null;
+  const finalName = looksLikeDomain && profileName ? profileName : company.name;
+
   await client
     .from("companies")
     .update({
       profile_json: profile,
+      name: finalName,
       industry: company.industry ?? validIndustry,
       niche: company.niche ?? (profile.niche as string | null),
       keywords: company.keywords?.length

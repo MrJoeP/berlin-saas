@@ -17,7 +17,7 @@ import { fetchArticleBody } from "../_shared/article_body.ts";
 
 const CLUSTERING_PROMPT = `Du erhältst eine Liste von News-Items aus verschiedenen Quellen mit Quellen-Tier (1=Primärquelle, 2=Editorial, 3=Community).
 
-Clustere die Items nach inhaltlichen Themen. Maximal 6 Cluster. Priorisiere Themen mit Tier-1- oder Tier-2-Quellen. Items mit nicht eindeutigem Theme oder reines Off-Topic-Geschnatter weglassen.
+Clustere die Items nach inhaltlichen Themen. 6 bis 9 Cluster (je mehr unterschiedliche Themen es gibt, desto mehr Cluster). Priorisiere Themen mit Tier-1- oder Tier-2-Quellen. Items mit nicht eindeutigem Theme oder reines Off-Topic-Geschnatter weglassen.
 
 Antworte nur mit JSON:
 {
@@ -203,7 +203,7 @@ async function fetchTopBodies(
     if ((b.score ?? 0) !== (a.score ?? 0)) return (b.score ?? 0) - (a.score ?? 0);
     return new Date(b.published_at ?? 0).getTime() - new Date(a.published_at ?? 0).getTime();
   });
-  const top = sorted.slice(0, 3);
+  const top = sorted.slice(0, 5);
   return await Promise.all(
     top.map(async (item) => ({
       item,

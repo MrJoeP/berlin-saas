@@ -16,31 +16,43 @@ function extractErrorMessage(err: unknown): string {
   return String(err);
 }
 
+// Initial-Name aus URL ableiten — wird vom Bot durch echten Firmen-Namen ersetzt.
+function nameFromUrl(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl);
+    return u.hostname.replace(/^www\./, "");
+  } catch {
+    return rawUrl.replace(/^https?:\/\//, "").replace(/^www\./, "").split("/")[0];
+  }
+}
+
 export function Setup() {
   const navigate = useNavigate();
   const { session } = useAuth();
-  const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!session?.user.id) {
+      setError("Keine aktive Session. Bitte einloggen.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
 
     try {
+      const initialName = nameFromUrl(url);
       const { data: company, error: companyErr } = await supabase
         .from("companies")
-        .insert({ user_id: session!.user.id, name, url: url || null, keywords: [] })
+        .insert({ user_id: session.user.id, name: initialName, url, keywords: [] })
         .select()
         .single();
 
       if (companyErr) throw companyErr;
       if (!company) throw new Error("Keine Company-ID zurück.");
 
-      // Bot übernimmt: scraped Website, klassifiziert Industrie, picked Sources,
-      // stößt den ersten News-Digest automatisch an.
       const { error: jobErr } = await supabase.from("jobs").insert({
         type: "scrape_company",
         company_id: company.id,
@@ -61,23 +73,12 @@ export function Setup() {
           <CardHeader>
             <CardTitle>Setup</CardTitle>
             <CardDescription>
-              Name und URL. Der Bot scraped, klassifiziert die Industrie und stößt den ersten Digest an.
+              Nur die Website-URL. Der Bot extrahiert Name, Industrie, Niche, Keywords und stößt den ersten Digest an.
             </CardDescription>
           </CardHeader>
           <form onSubmit={onSubmit}>
             <CardContent>
-              <Field>
-                <Label htmlFor="name" required>Firmen-Name</Label>
-                <Input
-                  id="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="z.B. Acme Labs"
-                  required
-                  autoFocus
-                />
-              </Field>
-              <Field hint="Der Bot extrahiert Profil, Niche und Keywords daraus.">
+              <Field hint="Z.B. https://buzzmatic.net — alles weitere übernimmt der Bot.">
                 <Label htmlFor="url" required>Website-URL</Label>
                 <Input
                   id="url"
@@ -86,6 +87,7 @@ export function Setup() {
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="https://acme.com"
                   required
+                  autoFocus
                 />
               </Field>
 
@@ -94,7 +96,7 @@ export function Setup() {
               )}
             </CardContent>
             <CardFooter className="flex justify-end">
-              <Button type="submit" disabled={submitting || !name || !url}>
+              <Button type="submit" disabled={submitting || !url}>
                 {submitting ? "Starte..." : "Los geht's"}
                 <ArrowRight className="w-4 h-4 ml-1" />
               </Button>

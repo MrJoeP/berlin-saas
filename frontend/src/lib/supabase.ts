@@ -30,7 +30,7 @@ export interface Source {
 export interface Company {
   id: string;
   user_id: string;
-  name: string;
+  name: string | null;
   url: string | null;
   tagline: string | null;
   industry: string | null;
@@ -39,6 +39,7 @@ export interface Company {
   voice_sample: string | null;
   profile_json: Record<string, unknown>;
   active: boolean;
+  scan_frequency: "daily" | "weekly";
   created_at: string;
 }
 

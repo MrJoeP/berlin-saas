@@ -593,6 +593,14 @@ export function Dashboard() {
     }, 3000);
   }
 
+  async function toggleFrequency() {
+    if (!company) return;
+    const next = company.scan_frequency === "daily" ? "weekly" : "daily";
+    setCompany({ ...company, scan_frequency: next });
+    setAllCompanies((prev) => prev.map((c) => (c.id === company.id ? { ...c, scan_frequency: next } : c)));
+    await supabase.from("companies").update({ scan_frequency: next }).eq("id", company.id);
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -640,19 +648,31 @@ export function Dashboard() {
               >
                 {allCompanies.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name}
+                    {c.name ?? c.url ?? "Unbenannt"}
                   </option>
                 ))}
               </select>
             ) : (
-              <h1 className="text-2xl font-semibold">{company.name}</h1>
+              <h1 className="text-2xl font-semibold">{company.name ?? company.url ?? "Unbenannt"}</h1>
             )}
             <p className="text-sm text-[var(--color-muted)] mt-1">
               {company.industry ?? "Keine Industrie gesetzt"}
               {company.niche && ` · ${company.niche}`}
             </p>
           </div>
-          <div className="flex gap-2 shrink-0">
+          <div className="flex gap-2 shrink-0 items-center">
+            <button
+              type="button"
+              onClick={toggleFrequency}
+              className={`text-xs font-medium px-2.5 py-1.5 rounded-md border transition-colors ${
+                company.scan_frequency === "daily"
+                  ? "bg-orange-50 text-orange-700 border-orange-300 hover:bg-orange-100"
+                  : "bg-blue-50 text-blue-700 border-blue-300 hover:bg-blue-100"
+              }`}
+              title={`Aktuell ${company.scan_frequency}. Klick zum Wechseln.`}
+            >
+              {company.scan_frequency === "daily" ? "🟠 Daily" : "🔵 Weekly"}
+            </button>
             <Button variant="ghost" size="sm" onClick={() => navigate("/setup")}>
               <Plus className="w-4 h-4 mr-1" />
               Neues Unternehmen
