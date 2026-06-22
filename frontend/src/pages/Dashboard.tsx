@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, RefreshCw, ChevronDown, ChevronRight, ArrowBigUp, ArrowBigDown } from "lucide-react";
+import { ArrowRight, RefreshCw, ChevronDown, ChevronRight, ArrowBigUp, ArrowBigDown, Plus } from "lucide-react";
 import {
   supabase,
   type Company,
@@ -399,6 +399,7 @@ const CONFIDENCE_COLORS: Record<"verified" | "editorial" | "community", string> 
 export function Dashboard() {
   const navigate = useNavigate();
   const [company, setCompany] = useState<Company | null>(null);
+  const [allCompanies, setAllCompanies] = useState<Company[]>([]);
   const [digests, setDigests] = useState<DigestWithItems[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
@@ -461,17 +462,21 @@ export function Dashboard() {
     const { data: companies } = await supabase
       .from("companies")
       .select("*")
-      .order("created_at", { ascending: false })
-      .limit(1);
+      .order("created_at", { ascending: false });
 
     if (!companies || companies.length === 0) {
       setCompany(null);
+      setAllCompanies([]);
       setLoading(false);
       navigate("/setup");
       return;
     }
 
-    const currentCompany = companies[0] as Company;
+    setAllCompanies(companies as Company[]);
+    // Aktive Company: aktuell ausgewählte beibehalten falls noch in Liste, sonst neueste.
+    const currentCompany = company && companies.some((c) => c.id === company.id)
+      ? (companies.find((c) => c.id === company.id) as Company)
+      : (companies[0] as Company);
     setCompany(currentCompany);
 
     const { data: digestData } = await supabase
@@ -507,6 +512,40 @@ export function Dashboard() {
       }
     }
 
+    setLoading(false);
+  }
+
+  async function switchCompany(newCompany: Company) {
+    setCompany(newCompany);
+    setDigests([]);
+    setLoading(true);
+    const { data: digestData } = await supabase
+      .from("digests")
+      .select("*")
+      .eq("company_id", newCompany.id)
+      .order("generated_at", { ascending: false });
+    if (digestData) {
+      const enriched = await Promise.all(
+        digestData.map(async (d) => {
+          const { data: items } = await supabase
+            .from("digest_items").select("*").eq("digest_id", d.id);
+          return { ...d, items: (items ?? []) as DigestItem[] } as DigestWithItems;
+        }),
+      );
+      setDigests(enriched);
+      const digestIds = enriched.map((d) => d.id);
+      if (digestIds.length > 0) {
+        const { data: votes } = await supabase
+          .from("digest_cluster_votes").select("*").in("digest_id", digestIds);
+        const map: Record<string, ClusterVote> = {};
+        for (const v of (votes ?? []) as ClusterVote[]) {
+          map[`${v.digest_id}|${v.cluster_name}`] = v;
+        }
+        setClusterVotes(map);
+      } else {
+        setClusterVotes({});
+      }
+    }
     setLoading(false);
   }
 
@@ -556,18 +595,41 @@ export function Dashboard() {
     <div className="min-h-screen px-4 py-8">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-semibold">{company.name}</h1>
-            <p className="text-sm text-[var(--color-muted)]">
+        <div className="flex items-start justify-between gap-3 mb-8 flex-wrap">
+          <div className="min-w-0">
+            {allCompanies.length > 1 ? (
+              <select
+                value={company.id}
+                onChange={(e) => {
+                  const selected = allCompanies.find((c) => c.id === e.target.value);
+                  if (selected) switchCompany(selected);
+                }}
+                className="text-2xl font-semibold bg-transparent border-none -ml-1 pl-1 pr-7 py-0 cursor-pointer rounded hover:bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] truncate max-w-full"
+              >
+                {allCompanies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <h1 className="text-2xl font-semibold">{company.name}</h1>
+            )}
+            <p className="text-sm text-[var(--color-muted)] mt-1">
               {company.industry ?? "Keine Industrie gesetzt"}
               {company.niche && ` · ${company.niche}`}
             </p>
           </div>
-          <Button variant="secondary" size="sm" onClick={triggerRun} disabled={triggering}>
-            <RefreshCw className={`w-4 h-4 mr-1 ${triggering ? "animate-spin" : ""}`} />
-            {triggering ? "Triggered..." : "Run now"}
-          </Button>
+          <div className="flex gap-2 shrink-0">
+            <Button variant="ghost" size="sm" onClick={() => navigate("/setup")}>
+              <Plus className="w-4 h-4 mr-1" />
+              Neues Unternehmen
+            </Button>
+            <Button variant="secondary" size="sm" onClick={triggerRun} disabled={triggering}>
+              <RefreshCw className={`w-4 h-4 mr-1 ${triggering ? "animate-spin" : ""}`} />
+              {triggering ? "Triggered..." : "Run now"}
+            </Button>
+          </div>
         </div>
 
         {digests.length === 0 ? (
