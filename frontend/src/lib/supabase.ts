@@ -79,4 +79,12 @@ export interface DigestItem {
   cluster_confidence: "verified" | "editorial" | "community" | null;
   published_at: string | null;
   upvotes: number;
+  downvotes: number;
+}
+
+export interface ClusterVote {
+  digest_id: string;
+  cluster_name: string;
+  upvotes: number;
+  downvotes: number;
 }

@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRight, RefreshCw, ChevronDown, ChevronRight, ArrowBigUp } from "lucide-react";
+import { ArrowRight, RefreshCw, ChevronDown, ChevronRight, ArrowBigUp, ArrowBigDown } from "lucide-react";
 import {
   supabase,
   type Company,
   type Digest,
   type DigestItem,
   type ClusterAnalysis,
+  type ClusterVote,
 } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
 import {
@@ -69,19 +70,36 @@ function detectPlatform(sourceName: string | null): string {
   return sourceName;
 }
 
-function ItemRow({ item, onUpvote }: { item: DigestItem; onUpvote: (id: string) => void }) {
+function ItemRow({ item, onVote }: { item: DigestItem; onVote: (id: string, dir: "up" | "down") => void }) {
   const tier = (item.source_tier ?? 3) as 1 | 2 | 3;
+  const score = (item.upvotes ?? 0) - (item.downvotes ?? 0);
   return (
     <li className="flex items-start gap-2 group">
-      <button
-        type="button"
-        onClick={() => onUpvote(item.id)}
-        className="shrink-0 mt-0.5 flex flex-col items-center justify-center w-8 px-1 py-0.5 rounded hover:bg-[var(--color-bg)] transition-colors text-[var(--color-muted)] hover:text-[var(--color-accent)]"
-        title="Upvote — für Algorithmus markieren"
-      >
-        <ArrowBigUp className="w-4 h-4" />
-        <span className="text-[10px] font-medium tabular-nums leading-none">{item.upvotes ?? 0}</span>
-      </button>
+      <div className="shrink-0 mt-0.5 flex flex-col items-center justify-center w-7">
+        <button
+          type="button"
+          onClick={() => onVote(item.id, "up")}
+          className="p-0.5 rounded hover:bg-emerald-50 transition-colors text-[var(--color-muted)] hover:text-emerald-600"
+          title="Upvote"
+        >
+          <ArrowBigUp className="w-4 h-4" />
+        </button>
+        <span
+          className={`text-[10px] font-medium tabular-nums leading-tight ${
+            score > 0 ? "text-emerald-600" : score < 0 ? "text-red-600" : "text-[var(--color-muted)]"
+          }`}
+        >
+          {score > 0 ? `+${score}` : score}
+        </span>
+        <button
+          type="button"
+          onClick={() => onVote(item.id, "down")}
+          className="p-0.5 rounded hover:bg-red-50 transition-colors text-[var(--color-muted)] hover:text-red-600"
+          title="Downvote"
+        >
+          <ArrowBigDown className="w-4 h-4" />
+        </button>
+      </div>
       <span
         className={`shrink-0 mt-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[tier]}`}
         title={TIER_LABELS[tier]}
@@ -108,15 +126,15 @@ function ItemRow({ item, onUpvote }: { item: DigestItem; onUpvote: (id: string) 
   );
 }
 
-function ItemList({ items, onUpvote }: { items: DigestItem[]; onUpvote: (id: string) => void }) {
+function ItemList({ items, onVote }: { items: DigestItem[]; onVote: (id: string, dir: "up" | "down") => void }) {
   return (
     <ul className="space-y-1.5">
-      {items.map((item) => <ItemRow key={item.id} item={item} onUpvote={onUpvote} />)}
+      {items.map((item) => <ItemRow key={item.id} item={item} onVote={onVote} />)}
     </ul>
   );
 }
 
-function DeepAnalysisView({ analysis, items, onUpvote }: { analysis: ClusterAnalysis; items: DigestItem[]; onUpvote: (id: string) => void }) {
+function DeepAnalysisView({ analysis, items, onVote }: { analysis: ClusterAnalysis; items: DigestItem[]; onVote: (id: string, dir: "up" | "down") => void }) {
   return (
     <div className="pt-3 space-y-4">
       <div>
@@ -157,7 +175,7 @@ function DeepAnalysisView({ analysis, items, onUpvote }: { analysis: ClusterAnal
           Alle Quellen ({items.length})
         </summary>
         <div className="mt-2">
-          <ItemList items={items} onUpvote={onUpvote} />
+          <ItemList items={items} onVote={onVote} />
         </div>
       </details>
     </div>
@@ -171,13 +189,13 @@ function CommunitySection({
   digestId,
   expanded,
   toggle,
-  onUpvote,
+  onVote,
 }: {
   items: DigestItem[];
   digestId: string;
   expanded: Record<string, boolean>;
   toggle: (key: string) => void;
-  onUpvote: (id: string) => void;
+  onVote: (id: string, dir: "up" | "down") => void;
 }) {
   const byPlatform: Record<string, DigestItem[]> = {};
   for (const item of items) {
@@ -232,8 +250,12 @@ function CommunitySection({
               {isOpen && (
                 <div className="px-3 pb-3 pt-2 border-t border-[var(--color-border)]">
                   <ItemList
-                    items={[...platformItems].sort((a, b) => (b.upvotes ?? 0) - (a.upvotes ?? 0))}
-                    onUpvote={onUpvote}
+                    items={[...platformItems].sort((a, b) => {
+                      const sa = (a.upvotes ?? 0) - (a.downvotes ?? 0);
+                      const sb = (b.upvotes ?? 0) - (b.downvotes ?? 0);
+                      return sb - sa;
+                    })}
+                    onVote={onVote}
                   />
                 </div>
               )}
@@ -253,7 +275,9 @@ function Section({
   expanded,
   toggle,
   analyses,
-  onUpvote,
+  onVote,
+  clusterVotes,
+  onVoteCluster,
   dimmed = false,
 }: {
   title: string;
@@ -263,7 +287,9 @@ function Section({
   expanded: Record<string, boolean>;
   toggle: (key: string) => void;
   analyses: ClusterAnalysis[];
-  onUpvote: (id: string) => void;
+  onVote: (id: string, dir: "up" | "down") => void;
+  clusterVotes: Record<string, ClusterVote>;
+  onVoteCluster: (digestId: string, clusterName: string, dir: "up" | "down") => void;
   dimmed?: boolean;
 }) {
   return (
@@ -280,45 +306,78 @@ function Section({
           const key = `${digestId}|${clusterName}`;
           const isOpen = !!expanded[key];
           const analysis = analyses.find((a) => a.cluster_name === clusterName);
+          const cv = clusterVotes[key];
+          const clusterScore = (cv?.upvotes ?? 0) - (cv?.downvotes ?? 0);
           return (
             <div key={clusterName} className="border border-[var(--color-border)] rounded-md overflow-hidden">
-              <button
-                type="button"
-                onClick={() => toggle(key)}
-                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--color-bg)] transition-colors text-left"
-              >
-                {isOpen ? (
-                  <ChevronDown className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
-                )}
-                <span className="text-sm font-semibold flex-1 truncate">{clusterName}</span>
-                {analysis && analysis.trend_streak >= 2 && (
-                  <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-300">
-                    {analysis.trend_streak}. Woche
+              <div className="flex items-stretch">
+                <button
+                  type="button"
+                  onClick={() => toggle(key)}
+                  className="flex-1 flex items-center gap-2 px-3 py-2 hover:bg-[var(--color-bg)] transition-colors text-left min-w-0"
+                >
+                  {isOpen ? (
+                    <ChevronDown className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
+                  )}
+                  <span className="text-sm font-semibold flex-1 truncate">{clusterName}</span>
+                  {analysis && analysis.trend_streak >= 2 && (
+                    <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-300">
+                      {analysis.trend_streak}. Woche
+                    </span>
+                  )}
+                  {confidence && (
+                    <span
+                      className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded ${CONFIDENCE_COLORS[confidence]}`}
+                    >
+                      {CONFIDENCE_LABELS[confidence]}
+                    </span>
+                  )}
+                  <span className="shrink-0 text-xs text-[var(--color-muted)] tabular-nums">
+                    {items.length}
                   </span>
-                )}
-                {confidence && (
-                  <span
-                    className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded ${CONFIDENCE_COLORS[confidence]}`}
+                </button>
+                <div className="shrink-0 flex items-center border-l border-[var(--color-border)]">
+                  <button
+                    type="button"
+                    onClick={() => onVoteCluster(digestId, clusterName, "up")}
+                    className="px-2 py-2 hover:bg-emerald-50 transition-colors text-[var(--color-muted)] hover:text-emerald-600"
+                    title="Thema upvoten"
                   >
-                    {CONFIDENCE_LABELS[confidence]}
+                    <ArrowBigUp className="w-4 h-4" />
+                  </button>
+                  <span
+                    className={`px-1 text-xs font-medium tabular-nums w-7 text-center ${
+                      clusterScore > 0
+                        ? "text-emerald-600"
+                        : clusterScore < 0
+                          ? "text-red-600"
+                          : "text-[var(--color-muted)]"
+                    }`}
+                  >
+                    {clusterScore > 0 ? `+${clusterScore}` : clusterScore}
                   </span>
-                )}
-                <span className="shrink-0 text-xs text-[var(--color-muted)] tabular-nums">
-                  {items.length}
-                </span>
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => onVoteCluster(digestId, clusterName, "down")}
+                    className="px-2 py-2 hover:bg-red-50 transition-colors text-[var(--color-muted)] hover:text-red-600"
+                    title="Thema downvoten"
+                  >
+                    <ArrowBigDown className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
               {isOpen && (
                 <div className="px-3 pb-3 pt-1 border-t border-[var(--color-border)]">
                   {analysis ? (
-                    <DeepAnalysisView analysis={analysis} items={items} onUpvote={onUpvote} />
+                    <DeepAnalysisView analysis={analysis} items={items} onVote={onVote} />
                   ) : (
                     <>
                       {items[0]?.summary && (
                         <p className="text-sm text-[var(--color-fg)] mb-3 mt-2">{items[0].summary}</p>
                       )}
-                      <ItemList items={items} onUpvote={onUpvote} />
+                      <ItemList items={items} onVote={onVote} />
                     </>
                   )}
                 </div>
@@ -345,25 +404,51 @@ export function Dashboard() {
   const [triggering, setTriggering] = useState(false);
   const [activeFilter, setActiveFilter] = useState<DigestFilter>("all");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [clusterVotes, setClusterVotes] = useState<Record<string, ClusterVote>>({});
 
   function toggleCluster(key: string) {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
   }
 
-  async function upvoteItem(itemId: string) {
+  function clusterKey(digestId: string, clusterName: string) {
+    return `${digestId}|${clusterName}`;
+  }
+
+  async function voteItem(itemId: string, direction: "up" | "down") {
+    const field = direction === "up" ? "upvotes" : "downvotes";
     // Optimistic UI Update.
+    let nextValue = 0;
     setDigests((prev) =>
       prev.map((d) => ({
         ...d,
-        items: d.items.map((it) =>
-          it.id === itemId ? { ...it, upvotes: (it.upvotes ?? 0) + 1 } : it,
-        ),
+        items: d.items.map((it) => {
+          if (it.id !== itemId) return it;
+          nextValue = (it[field] ?? 0) + 1;
+          return { ...it, [field]: nextValue };
+        }),
       })),
     );
-    // DB-Write — Failures sind nicht kritisch (Counter wird beim nächsten Reload re-synced).
-    const current = digests.flatMap((d) => d.items).find((it) => it.id === itemId);
-    const next = (current?.upvotes ?? 0) + 1;
-    await supabase.from("digest_items").update({ upvotes: next }).eq("id", itemId);
+    await supabase.from("digest_items").update({ [field]: nextValue }).eq("id", itemId);
+  }
+
+  async function voteCluster(digestId: string, clusterName: string, direction: "up" | "down") {
+    const key = clusterKey(digestId, clusterName);
+    const current = clusterVotes[key] ?? { digest_id: digestId, cluster_name: clusterName, upvotes: 0, downvotes: 0 };
+    const field = direction === "up" ? "upvotes" : "downvotes";
+    const next = { ...current, [field]: current[field] + 1 };
+    // Optimistic UI Update.
+    setClusterVotes((prev) => ({ ...prev, [key]: next }));
+    // Upsert in DB.
+    await supabase.from("digest_cluster_votes").upsert(
+      {
+        digest_id: digestId,
+        cluster_name: clusterName,
+        upvotes: next.upvotes,
+        downvotes: next.downvotes,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "digest_id,cluster_name" },
+    );
   }
 
   useEffect(() => {
@@ -406,6 +491,20 @@ export function Dashboard() {
         }),
       );
       setDigests(enriched);
+
+      // Cluster-Votes für alle Digests bulk laden.
+      const digestIds = enriched.map((d) => d.id);
+      if (digestIds.length > 0) {
+        const { data: votes } = await supabase
+          .from("digest_cluster_votes")
+          .select("*")
+          .in("digest_id", digestIds);
+        const map: Record<string, ClusterVote> = {};
+        for (const v of (votes ?? []) as ClusterVote[]) {
+          map[`${v.digest_id}|${v.cluster_name}`] = v;
+        }
+        setClusterVotes(map);
+      }
     }
 
     setLoading(false);
@@ -576,7 +675,9 @@ export function Dashboard() {
                               expanded={expanded}
                               toggle={toggleCluster}
                               analyses={analyses}
-                              onUpvote={upvoteItem}
+                              onVote={voteItem}
+                              clusterVotes={clusterVotes}
+                              onVoteCluster={voteCluster}
                             />
                           )}
                           {communityItems.length > 0 && (
@@ -585,7 +686,7 @@ export function Dashboard() {
                               digestId={digest.id}
                               expanded={expanded}
                               toggle={toggleCluster}
-                              onUpvote={upvoteItem}
+                              onVote={voteItem}
                             />
                           )}
                         </>
