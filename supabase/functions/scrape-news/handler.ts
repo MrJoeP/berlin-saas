@@ -101,7 +101,15 @@ function filterItems(items: NewsItem[], companySources: any[], keywords: string[
 
   const now = Date.now();
   const seen = new Set<string>();
-  const normalizedKeywords = keywords.map((k) => k.toLowerCase());
+  // Keywords in einzelne Tokens zerlegen — "SEO Agentur" → ["seo", "agentur"].
+  // Match auf irgendeinen Token statt ganze Phrase. Sonst filtern deutsche Phrasen
+  // englischen Community-Content (YouTube, Twitter, internationale Reddit-Subs) weg.
+  const KEYWORD_STOPWORDS = new Set([
+    "und", "der", "die", "das", "für", "fur", "mit", "von", "the", "and", "for", "with", "ein", "eine",
+  ]);
+  const keywordTokens = keywords
+    .flatMap((k) => k.toLowerCase().split(/[\s\-,.&/]+/))
+    .filter((t) => t.length >= 3 && !KEYWORD_STOPWORDS.has(t));
 
   const passed: NewsItem[] = [];
 
@@ -123,11 +131,11 @@ function filterItems(items: NewsItem[], companySources: any[], keywords: string[
     if (seen.has(dedupKey)) continue;
     seen.add(dedupKey);
 
-    // 4. Keyword-Match Soft-Filter. T1 (Primärquellen) immer durchlassen.
-    if (normalizedKeywords.length > 0 && cfg.tier > 1) {
+    // 4. Keyword-Match nur für T3 — auf einzelne Tokens, nicht ganze Phrasen.
+    if (keywordTokens.length > 0 && cfg.tier === 3) {
       const haystack = (item.title + " " + (item.raw.description ?? "")).toLowerCase();
-      const matches = normalizedKeywords.some((kw) => haystack.includes(kw));
-      if (!matches && cfg.tier === 3) continue; // T3 muss matchen, T2 darf rein
+      const matches = keywordTokens.some((kw) => haystack.includes(kw));
+      if (!matches) continue;
     }
 
     passed.push(item);
@@ -240,20 +248,37 @@ async function fetchReddit(source: Source): Promise<NewsItem[]> {
   const config = source.config as any;
   const subreddit = config.subreddit;
   if (!subreddit) return [];
-  const url = `https://www.reddit.com/r/${subreddit}/top.json?t=week&limit=25`;
-  const response = await fetch(url, { headers: { "user-agent": "berlin-saas-bot/1.0" } });
+  // Reddit blockt JSON API aggressiv. .rss Endpoint ist lockerer.
+  // Items kommen ohne Score zurück, also setzen wir Score = source.min_score
+  // damit der Score-Filter (config.min_score) sie nicht direkt rauswirft.
+  const url = `https://www.reddit.com/r/${subreddit}/top.rss?t=week&limit=50`;
+  const response = await fetch(url, {
+    headers: { "user-agent": "Mozilla/5.0 (compatible; berlin-saas-digest/1.0)" },
+  });
   if (!response.ok) throw new Error(`Reddit ${subreddit} failed: ${response.status}`);
-  const data = await response.json();
-  // deno-lint-ignore no-explicit-any
-  return (data.data?.children ?? []).map((c: any) => ({
-    title: c.data.title,
-    url: `https://reddit.com${c.data.permalink}`,
-    source_name: `r/${subreddit}`,
-    source_tier: source.tier,
-    published_at: new Date(c.data.created_utc * 1000).toISOString(),
-    score: c.data.score ?? 0,
-    raw: { num_comments: c.data.num_comments, source_type: "reddit" },
-  }));
+  const xml = await response.text();
+  const items: NewsItem[] = [];
+  const entryRegex = /<entry[\s\S]*?<\/entry>/gi;
+  const titleRegex = /<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i;
+  const linkRegex = /<link[^>]*?href="([^"]+)"/i;
+  const updatedRegex = /<updated[^>]*>([\s\S]*?)<\/updated>/i;
+  const matches = xml.match(entryRegex) ?? [];
+  for (const block of matches) {
+    const title = block.match(titleRegex)?.[1]?.trim();
+    const url = block.match(linkRegex)?.[1]?.trim();
+    const updatedStr = block.match(updatedRegex)?.[1]?.trim();
+    if (!title || !url) continue;
+    items.push({
+      title,
+      url,
+      source_name: `r/${subreddit}`,
+      source_tier: source.tier,
+      published_at: updatedStr ? safeIsoDate(updatedStr) : null,
+      score: source.min_score, // pseudo-score, bypasses min_score filter
+      raw: { source_type: "reddit" },
+    });
+  }
+  return items;
 }
 
 async function fetchHackerNews(source: Source): Promise<NewsItem[]> {

@@ -140,7 +140,7 @@ async function clusterItems(items: NewsItem[], company: Company): Promise<Digest
       role: "user",
       content: `Industrie: ${company.industry}\nNische: ${company.niche ?? ""}\nKeywords: ${company.keywords.join(", ")}\n\nItems:\n${itemsList}`,
     }],
-    max_tokens: 2000,
+    max_tokens: 4000,
   });
   return result.clusters.map((c) => ({
     cluster_name: c.cluster_name,
@@ -275,7 +275,7 @@ ${bodyExcerpts || "(keine Volltexte verfügbar — synthetisiere aus Titeln)"}`;
     system: systemPrompt,
     cacheSystem: true,
     messages: [{ role: "user", content: userPrompt }],
-    max_tokens: 2500,
+    max_tokens: 4000,
     temperature: 0,
   });
 }
