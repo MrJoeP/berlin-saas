@@ -355,6 +355,11 @@ function CommunitySection({
           Reddit, Hacker News, Twitter/X, YouTube, LinkedIn · roh, ungeprüft
         </span>
       </div>
+      {entries.length === 0 && (
+        <div className="text-xs text-[var(--color-muted)] italic py-3 px-3 bg-[var(--color-surface)] rounded-md">
+          Keine Community-Items in diesem Digest. Reddit kann von Supabase Edge Functions geblockt werden; YouTube/Twitter/LinkedIn Feeds liefern aktuell nichts. Beim nächsten Scrape wird's automatisch retried.
+        </div>
+      )}
       <div className="space-y-1">
         {entries.map(([platform, platformItems]) => {
           const key = `${digestId}|community|${platform}`;
@@ -903,16 +908,14 @@ export function Dashboard() {
                               onVoteCluster={voteCluster}
                             />
                           )}
-                          {communityItems.length > 0 && (
-                            <CommunitySection
-                              items={communityItems}
-                              digestId={digest.id}
-                              expanded={expanded}
-                              toggle={toggleCluster}
-                              onVote={voteItem}
-                              votes={votes}
-                            />
-                          )}
+                          <CommunitySection
+                            items={communityItems}
+                            digestId={digest.id}
+                            expanded={expanded}
+                            toggle={toggleCluster}
+                            onVote={voteItem}
+                            votes={votes}
+                          />
                         </>
                       );
                     })()}

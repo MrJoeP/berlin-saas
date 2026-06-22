@@ -131,9 +131,10 @@ function filterItems(items: NewsItem[], companySources: any[], keywords: string[
     if (seen.has(dedupKey)) continue;
     seen.add(dedupKey);
 
-    // 4. Keyword-Match jetzt auch für T2: User-Buzzwords steuern was reinkommt.
-    //    T1 bleibt ungefiltert (Primärquellen sind immer wichtig).
-    if (keywordTokens.length > 0 && cfg.tier >= 2) {
+    // 4. Keyword-Match nur für T2: User-Buzzwords steuern was reinkommt.
+    //    T1 (Primärquellen) und T3 (Community) bleiben ungefiltert — T3 soll
+    //    Community-News-Sektion ohne harten Filter mit Inhalten füllen.
+    if (keywordTokens.length > 0 && cfg.tier === 2) {
       const haystack = (item.title + " " + (item.raw.description ?? "")).toLowerCase();
       const matches = keywordTokens.some((kw) => haystack.includes(kw));
       if (!matches) continue;
@@ -249,14 +250,31 @@ async function fetchReddit(source: Source): Promise<NewsItem[]> {
   const config = source.config as any;
   const subreddit = config.subreddit;
   if (!subreddit) return [];
-  // Reddit blockt JSON API aggressiv. .rss Endpoint ist lockerer.
-  // Items kommen ohne Score zurück, also setzen wir Score = source.min_score
-  // damit der Score-Filter (config.min_score) sie nicht direkt rauswirft.
-  const url = `https://www.reddit.com/r/${subreddit}/top.rss?t=week&limit=50`;
-  const response = await fetch(url, {
-    headers: { "user-agent": "Mozilla/5.0 (compatible; berlin-saas-digest/1.0)" },
-  });
-  if (!response.ok) throw new Error(`Reddit ${subreddit} failed: ${response.status}`);
+  // Reddit blockt Supabase Edge Function IPs. Fallback-Versuche in Reihenfolge:
+  // 1. Direct reddit.com .rss
+  // 2. rsshub.app proxy als Alternative
+  // Items kommen ohne Score zurück, also setzen wir Score = source.min_score.
+  const urls = [
+    `https://www.reddit.com/r/${subreddit}/top.rss?t=week&limit=50`,
+    `https://rsshub.app/reddit/r/${subreddit}/top/week`,
+  ];
+  let response: Response | null = null;
+  let lastErr: string = "";
+  for (const u of urls) {
+    try {
+      const r = await fetch(u, {
+        headers: { "user-agent": "Mozilla/5.0 (compatible; berlin-saas-digest/1.0)" },
+      });
+      if (r.ok) {
+        response = r;
+        break;
+      }
+      lastErr = `${u} → ${r.status}`;
+    } catch (e) {
+      lastErr = `${u} → ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+  if (!response) throw new Error(`Reddit ${subreddit} failed all proxies: ${lastErr}`);
   const xml = await response.text();
   const items: NewsItem[] = [];
   const entryRegex = /<entry[\s\S]*?<\/entry>/gi;
