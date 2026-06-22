@@ -58,6 +58,103 @@ const CONFIDENCE_LABELS: Record<"verified" | "editorial" | "community", string> 
   community: "Diskussion",
 };
 
+function KeywordsEditor({
+  keywords,
+  onSave,
+}: {
+  keywords: string[];
+  onSave: (next: string[]) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(keywords.join(", "));
+
+  function start() {
+    setDraft(keywords.join(", "));
+    setEditing(true);
+  }
+
+  async function commit() {
+    const next = Array.from(
+      new Set(
+        draft
+          .split(",")
+          .map((k) => k.trim())
+          .filter(Boolean),
+      ),
+    );
+    await onSave(next);
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div className="mb-6 p-3 border border-[var(--color-accent)] rounded-md bg-[var(--color-bg)]">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-2">
+          Buzzwords (komma-getrennt) — steuern Pre-Filter & Themen-Fokus
+        </div>
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          className="w-full text-sm px-2 py-1.5 rounded border border-[var(--color-border)] bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+          rows={2}
+          placeholder="z.B. SEO Agentur, Content SEO, AI Overviews, AIO, Backlinks, Keyword Research"
+          autoFocus
+        />
+        <div className="flex gap-2 mt-2 justify-end">
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            className="text-xs px-3 py-1 rounded text-[var(--color-muted)] hover:bg-[var(--color-surface)]"
+          >
+            Abbrechen
+          </button>
+          <button
+            type="button"
+            onClick={commit}
+            className="text-xs px-3 py-1 rounded bg-[var(--color-accent)] text-white hover:opacity-90"
+          >
+            Speichern
+          </button>
+        </div>
+        <p className="text-[10px] text-[var(--color-muted)] mt-2">
+          Wirkt ab dem nächsten Scrape. Tier-2- und Tier-3-Quellen werden nach diesen Begriffen gefiltert. Tier-1 (Primärquellen) bleiben immer rein.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-6 flex items-start gap-2 flex-wrap">
+      <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)] mt-1.5">
+        Buzzwords:
+      </span>
+      <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
+        {keywords.length === 0 ? (
+          <span className="text-xs text-[var(--color-muted)] italic mt-1.5">
+            Keine gesetzt — alle Quellen-Items kommen rein.
+          </span>
+        ) : (
+          keywords.map((k) => (
+            <span
+              key={k}
+              className="text-xs px-2 py-1 rounded-full bg-[var(--color-surface)] text-[var(--color-fg)] border border-[var(--color-border)]"
+            >
+              {k}
+            </span>
+          ))
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={start}
+        className="text-xs px-2.5 py-1 rounded border border-[var(--color-border)] text-[var(--color-fg)] hover:bg-[var(--color-surface)]"
+      >
+        Bearbeiten
+      </button>
+    </div>
+  );
+}
+
 // Plattform-Mapping aus source_name. Für Community-News-Gruppierung.
 function detectPlatform(sourceName: string | null): string {
   if (!sourceName) return "Andere";
@@ -601,6 +698,13 @@ export function Dashboard() {
     await supabase.from("companies").update({ scan_frequency: next }).eq("id", company.id);
   }
 
+  async function saveKeywords(newKeywords: string[]) {
+    if (!company) return;
+    setCompany({ ...company, keywords: newKeywords });
+    setAllCompanies((prev) => prev.map((c) => (c.id === company.id ? { ...c, keywords: newKeywords } : c)));
+    await supabase.from("companies").update({ keywords: newKeywords }).eq("id", company.id);
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -686,6 +790,8 @@ export function Dashboard() {
             </Button>
           </div>
         </div>
+
+        <KeywordsEditor keywords={company.keywords} onSave={saveKeywords} />
 
         {digests.length === 0 ? (
           <Card>

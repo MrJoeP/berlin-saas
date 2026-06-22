@@ -131,8 +131,9 @@ function filterItems(items: NewsItem[], companySources: any[], keywords: string[
     if (seen.has(dedupKey)) continue;
     seen.add(dedupKey);
 
-    // 4. Keyword-Match nur für T3 — auf einzelne Tokens, nicht ganze Phrasen.
-    if (keywordTokens.length > 0 && cfg.tier === 3) {
+    // 4. Keyword-Match jetzt auch für T2: User-Buzzwords steuern was reinkommt.
+    //    T1 bleibt ungefiltert (Primärquellen sind immer wichtig).
+    if (keywordTokens.length > 0 && cfg.tier >= 2) {
       const haystack = (item.title + " " + (item.raw.description ?? "")).toLowerCase();
       const matches = keywordTokens.some((kw) => haystack.includes(kw));
       if (!matches) continue;
