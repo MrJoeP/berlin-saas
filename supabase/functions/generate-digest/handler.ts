@@ -12,12 +12,12 @@
 
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { Job, NewsItem, DigestCluster, Company } from "../_shared/types.ts";
-import { callClaude, callClaudeJSON, DEFAULT_MODEL, OPUS_MODEL } from "../_shared/claude.ts";
+import { callClaudeJSON, DEFAULT_MODEL } from "../_shared/claude.ts";
 import { fetchArticleBody } from "../_shared/article_body.ts";
 
 const CLUSTERING_PROMPT = `Du erhältst eine Liste von News-Items aus verschiedenen Quellen mit Quellen-Tier (1=Primärquelle, 2=Editorial, 3=Community).
 
-Clustere die Items nach inhaltlichen Themen. 6 bis 9 Cluster (je mehr unterschiedliche Themen es gibt, desto mehr Cluster). Priorisiere Themen mit Tier-1- oder Tier-2-Quellen. Items mit nicht eindeutigem Theme oder reines Off-Topic-Geschnatter weglassen.
+Clustere die Items nach inhaltlichen Themen. 8 bis 14 Cluster (je mehr unterschiedliche Themen es gibt, desto mehr Cluster). Priorisiere Themen mit Tier-1- oder Tier-2-Quellen. Bevorzuge feinere Themen-Trennung — lieber zwei spezifische Cluster als einen breiten. Items mit nicht eindeutigem Theme oder reines Off-Topic-Geschnatter weglassen.
 
 Antworte nur mit JSON:
 {
@@ -203,7 +203,7 @@ async function fetchTopBodies(
     if ((b.score ?? 0) !== (a.score ?? 0)) return (b.score ?? 0) - (a.score ?? 0);
     return new Date(b.published_at ?? 0).getTime() - new Date(a.published_at ?? 0).getTime();
   });
-  const top = sorted.slice(0, 5);
+  const top = sorted.slice(0, 8);
   return await Promise.all(
     top.map(async (item) => ({
       item,
@@ -212,7 +212,7 @@ async function fetchTopBodies(
   );
 }
 
-// Opus 4.8 Deep-Synthesis pro Cluster.
+// Haiku Deep-Synthesis pro Cluster — on mass (billig, daher viele Cluster + lange Outputs).
 async function deepSynthesize(
   cluster: DigestCluster,
   company: Company,
@@ -226,6 +226,7 @@ async function deepSynthesize(
 Stil:
 - Faktisch, präzise, neutral. Keine Empfehlungen, keine Meinungen, keine Action-Items.
 - Zitiere wörtlich aus Originalquellen (mit Source-Name).
+- WICHTIG: Erfinde KEINE Zitate. Wenn kein wörtliches Zitat im Volltext steht, lass das key_quotes-Array leer.
 - Keine Marketing-Sprache, kein KI-Klang.
 - Konzentriere dich darauf was passiert ist, nicht was zu tun wäre.
 
@@ -237,9 +238,9 @@ Company-Profil (nur als Kontext für inhaltliche Relevanz-Einordnung, NICHT für
 
 Output-Schema (strikt JSON, keine Prosa drumherum):
 {
-  "was_passiert": "3-5 Sätze: was ist die Kernnachricht. Mit Datum, Zahlen und Zitat aus Primärquelle. Konzentriere dich auf Fakten, nicht Interpretation.",
+  "was_passiert": "5-8 Sätze: was ist die Kernnachricht. Konkret mit Datum, Zahlen, beteiligte Akteure, technische Details. Keine Interpretation.",
   "key_quotes": [
-    { "quote": "Wörtliches Zitat unter 30 Wörtern", "source": "Source-Name", "url": "Source-URL" }
+    { "quote": "Exakt aus dem Volltext kopiert, unter 30 Wörtern", "source": "Source-Name", "url": "Source-URL" }
   ]
 }`;
 
@@ -250,7 +251,7 @@ Output-Schema (strikt JSON, keine Prosa drumherum):
 
   const bodyExcerpts = bodies
     .filter((b) => b.body)
-    .map((b) => `### ${b.item.source_name}: ${b.item.title}\nURL: ${b.item.url}\n\n${b.body!.slice(0, 4000)}`)
+    .map((b) => `### ${b.item.source_name}: ${b.item.title}\nURL: ${b.item.url}\n\n${b.body!.slice(0, 6000)}`)
     .join("\n\n---\n\n");
 
   const trendNote = trendStreak >= 2
@@ -270,11 +271,11 @@ Volltext der Top-Quellen:
 ${bodyExcerpts || "(keine Volltexte verfügbar — synthetisiere aus Titeln)"}`;
 
   return await callClaudeJSON<Omit<ClusterAnalysis, "cluster_name" | "confidence" | "trend_streak">>({
-    model: OPUS_MODEL,
+    model: DEFAULT_MODEL,
     system: systemPrompt,
     cacheSystem: true,
     messages: [{ role: "user", content: userPrompt }],
-    max_tokens: 1500,
+    max_tokens: 2500,
     temperature: 0,
   });
 }

@@ -1,7 +1,6 @@
 // Claude-API-Client für Edge Functions.
-// Default-Modell: Haiku 4.5 (schnell, günstig).
-// Sonnet 4.6 für strukturierte Tasks (Profile, Clustering).
-// Opus 4.8 für Tiefen-Analyse mit Top-Qualität (Deep-Synthesis).
+// Default-Modell: Haiku 4.5 — übernimmt Clustering UND Deep-Synthesis (on mass).
+// Sonnet 4.6 nur für Profile-Extraction beim Company-Setup.
 //
 // Prompt-Caching: System-Prompts ab 1024 Tokens werden über cache_control "ephemeral"
 // für 5 Min gecached. Sparpotenzial bei wiederholten Calls im selben Run: ~90%.
@@ -9,7 +8,6 @@
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_MODEL = "claude-haiku-4-5-20251001";
 const SONNET_MODEL = "claude-sonnet-4-6";
-const OPUS_MODEL = "claude-opus-4-8";
 
 export interface ClaudeMessage {
   role: "user" | "assistant";
@@ -47,19 +45,13 @@ export async function callClaude(options: ClaudeCallOptions): Promise<ClaudeResp
     ];
   }
 
-  // Opus 4.8 supports no temperature parameter — nur für die anderen Modelle senden.
-  const model = options.model ?? DEFAULT_MODEL;
-  const supportsTemperature = !model.startsWith("claude-opus-4-8");
-
   const body: Record<string, unknown> = {
-    model,
+    model: options.model ?? DEFAULT_MODEL,
     max_tokens: options.max_tokens ?? 2048,
+    temperature: options.temperature ?? 0,
     system: systemPayload,
     messages: options.messages,
   };
-  if (supportsTemperature) {
-    body.temperature = options.temperature ?? 0;
-  }
 
   const response = await fetch(ANTHROPIC_API_URL, {
     method: "POST",
@@ -111,4 +103,4 @@ export async function callClaudeJSON<T>(options: ClaudeCallOptions): Promise<T> 
   }
 }
 
-export { DEFAULT_MODEL, SONNET_MODEL, OPUS_MODEL };
+export { DEFAULT_MODEL, SONNET_MODEL };
