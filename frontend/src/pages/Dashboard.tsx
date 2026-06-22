@@ -65,9 +65,9 @@ function detectPlatform(sourceName: string | null): string {
   if (s.startsWith("r/")) return "Reddit";
   if (s.includes("hacker news") || s.startsWith("hn ")) return "Hacker News";
   if (s.includes("product hunt") || s === "producthunt") return "Product Hunt";
-  if (s.includes("twitter") || s.includes("x.com") || s === "x") return "Twitter/X";
-  if (s.includes("youtube")) return "YouTube";
-  if (s.includes("linkedin")) return "LinkedIn";
+  if (s.startsWith("x ·") || s.startsWith("x.com") || s.includes("twitter")) return "Twitter/X";
+  if (s.startsWith("youtube ·") || s.includes("youtube")) return "YouTube";
+  if (s.startsWith("linkedin ·") || s.includes("linkedin")) return "LinkedIn";
   return sourceName;
 }
 
