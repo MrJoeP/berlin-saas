@@ -151,52 +151,6 @@ function TopPostSourcePanel({ items }: { items: DigestItem[] }) {
   );
 }
 
-function ComingSoonBlock({
-  title, week, color, description, sources, output,
-}: {
-  title: string; week: string; color: string; description: string;
-  sources: string[]; output: string;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <ToolBlock title={title} week={week} color={color} live={false}>
-      <Card className="opacity-60">
-        <CardHeader>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <CardTitle>{title}</CardTitle>
-              <CardDescription>{description}</CardDescription>
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)}>
-              {open ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
-              Details
-            </Button>
-          </div>
-        </CardHeader>
-        {open && (
-          <CardContent className="space-y-4">
-            <div>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1.5">Quellen</div>
-              <ul className="space-y-1">
-                {sources.map((s) => (
-                  <li key={s} className="text-sm text-[var(--color-muted)] flex items-start gap-2">
-                    <span className="mt-2 w-1 h-1 rounded-full bg-[var(--color-muted)] shrink-0" />
-                    {s}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1.5">Output</div>
-              <p className="text-sm text-[var(--color-muted)]">{output}</p>
-            </div>
-          </CardContent>
-        )}
-      </Card>
-    </ToolBlock>
-  );
-}
-
 function OlderDigests({
   digests: older, renderDigest,
 }: {
@@ -1023,34 +977,6 @@ export function Dashboard() {
           )}
         </ToolBlock>
 
-        {/* W3: Wettbewerbs-Monitor */}
-        <ComingSoonBlock
-          title="Wettbewerbs-Monitor"
-          week="W3"
-          color="bg-purple-600"
-          description="Deep-Track auf benannte Konkurrenz, Sales-Page-Diffs und Messaging-Änderungen."
-          sources={[
-            "Website-Scrape via Firecrawl — Diff auf Pricing, Features, Messaging",
-            "Google News RSS — Erwähnungen der Konkurrenten",
-            "Product Hunt — neue Launches im selben Segment",
-          ]}
-          output="Wöchentlicher Diff: Was hat sich geändert, was ist neu, was wurde entfernt. Direkt vergleichbar mit eigenem Messaging."
-        />
-
-        {/* W4: UGC-Hunter */}
-        <ComingSoonBlock
-          title="UGC-Hunter"
-          week="W4"
-          color="bg-orange-500"
-          description="Multi-Source-Mentions und Quote-Extraction aus Community-Posts und Reviews."
-          sources={[
-            "Reddit — Mentions in relevanten Subreddits via RSS",
-            "Twitter / X — Keyword-Suche via nitter oder API",
-            "G2 / Trustpilot — Review-Scrape für benannte Produkte",
-            "Product Hunt — Kommentare und Reviews",
-          ]}
-          output="Quote-Library: Originalzitate nach Kategorie (Problem, Lob, Kritik, Wunsch). Direkt verwendbar in Marketing-Texten und Ads."
-        />
       </div>
     </div>
   );
