@@ -12,6 +12,13 @@ const TIER_LABELS: Record<1 | 2 | 3, string> = {
   3: "T3 · Community",
 };
 
+const ACTION_LABELS: Record<NonNullable<ClusterAnalysis["signal_metrics"]>["action_hint"], string> = {
+  act: "Prüfen",
+  watch: "Beobachten",
+  content: "Content-Idee",
+  ignore: "Ignorieren",
+};
+
 export interface NicheNewsDigestProps {
   items: DigestItem[];
   digestId: string;
@@ -34,6 +41,9 @@ export function NicheNewsDigest({
   onVoteCluster,
 }: NicheNewsDigestProps) {
   const grouped = groupByCluster(items);
+  const sortedAnalyses = [...analyses].sort(
+    (a, b) => (b.signal_metrics?.priority_score ?? 0) - (a.signal_metrics?.priority_score ?? 0),
+  );
   const fachmeinung: [string, DigestItem[]][] = [];
   const communityItems: DigestItem[] = [];
 
@@ -50,14 +60,20 @@ export function NicheNewsDigest({
       if (item.cluster_confidence !== "community") communityItems.push(item);
     }
   }
+  const sortedFachmeinung = sortClusterEntries(fachmeinung, analyses);
+  const actClusters = sortedFachmeinung.filter(([name]) => actionForCluster(name, analyses) === "act");
+  const contentClusters = sortedFachmeinung.filter(([name]) => actionForCluster(name, analyses) === "content");
+  const watchClusters = sortedFachmeinung.filter(([name]) => actionForCluster(name, analyses) === "watch");
+  const ignoreClusters = sortedFachmeinung.filter(([name]) => actionForCluster(name, analyses) === "ignore");
 
   return (
     <>
-      {fachmeinung.length > 0 && (
+      {sortedAnalyses.length > 0 && <BriefingSummary analyses={sortedAnalyses} />}
+      {actClusters.length > 0 && (
         <Section
-          title="Fachmeinung"
-          hint="Primärquellen und Industry-Pubs · faktische Synthese"
-          clusters={fachmeinung}
+          title="Jetzt prüfen"
+          hint="Hohe Relevanz und genug Evidenz für einen kleinen internen Check"
+          clusters={actClusters}
           digestId={digestId}
           expanded={expanded}
           toggle={toggle}
@@ -65,6 +81,49 @@ export function NicheNewsDigest({
           onVote={onVote}
           votes={votes}
           onVoteCluster={onVoteCluster}
+        />
+      )}
+      {contentClusters.length > 0 && (
+        <Section
+          title="Content-Ideen"
+          hint="Community- oder Markt-Signale, die sich für Messaging und Posts eignen"
+          clusters={contentClusters}
+          digestId={digestId}
+          expanded={expanded}
+          toggle={toggle}
+          analyses={analyses}
+          onVote={onVote}
+          votes={votes}
+          onVoteCluster={onVoteCluster}
+        />
+      )}
+      {watchClusters.length > 0 && (
+        <Section
+          title="Beobachten"
+          hint="Relevant, aber noch zu früh oder zu dünn belegt"
+          clusters={watchClusters}
+          digestId={digestId}
+          expanded={expanded}
+          toggle={toggle}
+          analyses={analyses}
+          onVote={onVote}
+          votes={votes}
+          onVoteCluster={onVoteCluster}
+        />
+      )}
+      {ignoreClusters.length > 0 && (
+        <Section
+          title="Niedrige Priorität"
+          hint="Wenig Relevanz, schwache Evidenz oder viel Rauschen"
+          clusters={ignoreClusters}
+          digestId={digestId}
+          expanded={expanded}
+          toggle={toggle}
+          analyses={analyses}
+          onVote={onVote}
+          votes={votes}
+          onVoteCluster={onVoteCluster}
+          dimmed
         />
       )}
       <CommunitySection
@@ -76,6 +135,48 @@ export function NicheNewsDigest({
         votes={votes}
       />
     </>
+  );
+}
+
+function sortClusterEntries(entries: [string, DigestItem[]][], analyses: ClusterAnalysis[]) {
+  return [...entries].sort((a, b) =>
+    (analysisForCluster(b[0], analyses)?.signal_metrics?.priority_score ?? 0) -
+    (analysisForCluster(a[0], analyses)?.signal_metrics?.priority_score ?? 0)
+  );
+}
+
+function actionForCluster(clusterName: string, analyses: ClusterAnalysis[]) {
+  return analysisForCluster(clusterName, analyses)?.signal_metrics?.action_hint ?? "watch";
+}
+
+function analysisForCluster(clusterName: string, analyses: ClusterAnalysis[]) {
+  return analyses.find((a) => a.cluster_name === clusterName);
+}
+
+function BriefingSummary({ analyses }: { analyses: ClusterAnalysis[] }) {
+  const topSignals = analyses.filter((a) => a.signal_metrics).slice(0, 3);
+  if (topSignals.length === 0) return null;
+  return (
+    <div className="mb-6 rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-2">
+        Wichtigste Signale
+      </div>
+      <div className="grid gap-2">
+        {topSignals.map((analysis) => (
+          <div key={analysis.cluster_name} className="flex items-start gap-2">
+            <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[var(--color-accent)] text-white tabular-nums">
+              {analysis.signal_metrics?.priority_score}
+            </span>
+            <div className="min-w-0">
+              <div className="text-sm font-medium truncate">{analysis.cluster_name}</div>
+              <p className="text-xs text-[var(--color-muted)] leading-snug">
+                {analysis.warum_relevant || analysis.signal_metrics?.signal_reason}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -197,6 +298,42 @@ function DeepAnalysisView({
         </div>
         <p className="text-sm leading-relaxed text-[var(--color-fg)]">{analysis.was_passiert}</p>
       </div>
+      {analysis.warum_relevant && (
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1">
+            Warum relevant
+          </div>
+          <p className="text-sm leading-relaxed text-[var(--color-fg)]">{analysis.warum_relevant}</p>
+        </div>
+      )}
+      {analysis.einordnung && (
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1">
+            Einordnung
+          </div>
+          <p className="text-sm leading-relaxed text-[var(--color-fg)]">{analysis.einordnung}</p>
+        </div>
+      )}
+      {analysis.next_move && (
+        <div className="rounded-md bg-[var(--color-bg)] border border-[var(--color-border)] p-3">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1">
+            Umgang damit
+          </div>
+          <p className="text-sm leading-relaxed text-[var(--color-fg)]">{analysis.next_move}</p>
+        </div>
+      )}
+      {analysis.offene_fragen && analysis.offene_fragen.length > 0 && (
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1">
+            Offene Fragen
+          </div>
+          <ul className="space-y-1">
+            {analysis.offene_fragen.map((q) => (
+              <li key={q} className="text-sm text-[var(--color-muted)]">• {q}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {analysis.key_quotes?.length > 0 && (
         <div>
           <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1.5">
@@ -267,6 +404,7 @@ function Section({
           const isOpen = !!expanded[key];
           const analysis = analyses.find((a) => a.cluster_name === clusterName);
           const myClusterVote = votes[`cluster:${digestId}|${clusterName}`];
+          const metrics = analysis?.signal_metrics;
           return (
             <div key={clusterName} className="border border-[var(--color-border)] rounded-md overflow-hidden">
               <div className="flex items-stretch">
@@ -281,6 +419,19 @@ function Section({
                     <ChevronRight className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
                   )}
                   <span className="text-sm font-semibold flex-1 truncate">{clusterName}</span>
+                  {metrics && (
+                    <span
+                      className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[var(--color-accent)] text-white tabular-nums"
+                      title={metrics.signal_reason}
+                    >
+                      {metrics.priority_score}
+                    </span>
+                  )}
+                  {metrics && (
+                    <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded border bg-white text-[var(--color-fg)] border-[var(--color-border)]">
+                      {ACTION_LABELS[metrics.action_hint]}
+                    </span>
+                  )}
                   {confidence && (
                     <span
                       className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded border ${
@@ -325,9 +476,19 @@ function Section({
               {isOpen && (
                 <div className="px-3 pb-3 border-t border-[var(--color-border)]">
                   {analysis?.confidence_reason && (
-                    <p className="text-[10px] text-[var(--color-muted)] pt-2">
-                      Confidence: {analysis.confidence_reason}
-                    </p>
+                    <div className="flex flex-wrap gap-1.5 pt-2">
+                      <span className="text-[10px] text-[var(--color-muted)]">
+                        {analysis.confidence_reason}
+                      </span>
+                      {metrics && (
+                        <>
+                          <span className="text-[10px] text-[var(--color-muted)]">· Relevanz {metrics.relevance_score}</span>
+                          <span className="text-[10px] text-[var(--color-muted)]">· Evidenz {metrics.evidence_score}</span>
+                          <span className="text-[10px] text-[var(--color-muted)]">· Momentum {metrics.momentum_score}</span>
+                          <span className="text-[10px] text-[var(--color-muted)]">· Neuheit {metrics.novelty_score}</span>
+                        </>
+                      )}
+                    </div>
                   )}
                   {analysis ? (
                     <DeepAnalysisView analysis={analysis} items={items} onVote={onVote} votes={votes} />

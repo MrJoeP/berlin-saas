@@ -12,20 +12,30 @@
 
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { Job, NewsItem, Source } from "../_shared/types.ts";
+import {
+  type CompanySourceWithSource,
+  filterItems,
+} from "../_shared/news_filter.ts";
 
 const MAX_RAW_ITEMS_PER_SOURCE = 150;
 const MAX_FILTERED_ITEMS = 400;
 
-export async function handle(job: Job, client: SupabaseClient): Promise<Record<string, unknown>> {
-  if (!job.company_id) throw new Error("niche_news_scrape benötigt company_id.");
+export async function handle(
+  job: Job,
+  client: SupabaseClient,
+): Promise<Record<string, unknown>> {
+  if (!job.company_id) {
+    throw new Error("niche_news_scrape benötigt company_id.");
+  }
 
   const { data: company } = await client
     .from("companies")
-    .select("keywords")
+    .select("keywords, negative_keywords")
     .eq("id", job.company_id)
     .single();
 
   const keywords = (company?.keywords ?? []) as string[];
+  const negativeKeywords = (company?.negative_keywords ?? []) as string[];
 
   const { data: companySources, error } = await client
     .from("company_sources")
@@ -39,12 +49,20 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
   }
 
   const rawItems: NewsItem[] = [];
-  const sourceStats: Record<string, number> = {};
+  const sourceStats: Record<
+    string,
+    { fetched: number; accepted: number; error?: string }
+  > = {};
+  const sourceIdsByName: Record<string, string> = {};
 
   for (const row of companySources) {
     // deno-lint-ignore no-explicit-any
     const source = (row as any).sources as Source;
     if (!source) continue;
+    const sourceId = (row as { source_id: string }).source_id;
+    for (const alias of sourceAliases(source)) {
+      sourceIdsByName[alias] = sourceId;
+    }
 
     try {
       const items = await fetchSource(source);
@@ -53,15 +71,50 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
         source_tier: source.tier ?? 3,
       }));
       rawItems.push(...tagged);
-      sourceStats[source.name] = tagged.length;
+      sourceStats[source.name] = { fetched: tagged.length, accepted: 0 };
+      for (const alias of sourceAliases(source)) {
+        sourceStats[alias] = sourceStats[source.name];
+      }
     } catch (err) {
       console.error(`Source ${source.name} failed:`, err);
-      sourceStats[source.name] = 0;
+      const message = err instanceof Error ? err.message : String(err);
+      sourceStats[source.name] = { fetched: 0, accepted: 0, error: message };
+      await recordSourceHealth(client, job.company_id, sourceId, 0, 0, message);
     }
   }
 
   // Pre-Filter Pipeline.
-  const filtered = filterItems(rawItems, companySources, keywords);
+  const filtered = filterItems(
+    rawItems,
+    companySources as unknown as CompanySourceWithSource[],
+    keywords,
+    undefined,
+    negativeKeywords,
+  )
+    .slice(0, MAX_FILTERED_ITEMS);
+
+  for (const item of filtered) {
+    const stat = sourceStats[item.source_name];
+    if (stat) stat.accepted += 1;
+  }
+  const recordedSources = new Set<string>();
+  await Promise.all(
+    Object.entries(sourceStats).map(([sourceName, stat]) => {
+      const sourceId = sourceIdsByName[sourceName];
+      if (
+        !sourceId || stat.error || recordedSources.has(sourceId)
+      ) return Promise.resolve();
+      recordedSources.add(sourceId);
+      return recordSourceHealth(
+        client,
+        job.company_id!,
+        sourceId,
+        stat.fetched,
+        stat.accepted,
+        null,
+      );
+    }),
+  );
 
   const { data: clusterJob, error: enqueueErr } = await client
     .from("jobs")
@@ -74,7 +127,9 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
     .select()
     .single();
 
-  if (enqueueErr) throw new Error(`Cluster-Job enqueue failed: ${enqueueErr.message}`);
+  if (enqueueErr) {
+    throw new Error(`Cluster-Job enqueue failed: ${enqueueErr.message}`);
+  }
 
   return {
     items_raw: rawItems.length,
@@ -85,86 +140,51 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
   };
 }
 
-// deno-lint-ignore no-explicit-any
-function filterItems(items: NewsItem[], companySources: any[], keywords: string[]): NewsItem[] {
-  // Source-Config Lookup für Score/Age-Thresholds.
-  const sourceConfig: Record<string, { min_score: number; max_age_days: number; tier: number }> = {};
-  for (const row of companySources) {
-    const s = row.sources as Source;
-    if (!s) continue;
-    sourceConfig[s.name] = {
-      min_score: s.min_score ?? 0,
-      max_age_days: s.max_age_days ?? 7,
-      tier: s.tier ?? 3,
-    };
+function sourceAliases(source: Source): string[] {
+  const aliases = new Set([source.name]);
+  const config = source.config as Record<string, unknown>;
+  if (source.type === "reddit" && typeof config.subreddit === "string") {
+    aliases.add(`r/${config.subreddit}`);
   }
-
-  const now = Date.now();
-  const seen = new Set<string>();
-  // Keywords in einzelne Tokens zerlegen — "SEO Agentur" → ["seo", "agentur"].
-  // Match auf irgendeinen Token statt ganze Phrase. Sonst filtern deutsche Phrasen
-  // englischen Community-Content (YouTube, Twitter, internationale Reddit-Subs) weg.
-  const KEYWORD_STOPWORDS = new Set([
-    "und", "der", "die", "das", "für", "fur", "mit", "von", "the", "and", "for", "with", "ein", "eine",
-  ]);
-  const keywordTokens = keywords
-    .flatMap((k) => k.toLowerCase().split(/[\s\-,.&/]+/))
-    .filter((t) => t.length >= 3 && !KEYWORD_STOPWORDS.has(t));
-
-  const passed: NewsItem[] = [];
-
-  for (const item of items) {
-    const cfg = sourceConfig[item.source_name] ?? { min_score: 0, max_age_days: 7, tier: 3 };
-
-    // 1. Score-Filter (Reddit upvotes, HN points).
-    if (cfg.min_score > 0 && (item.score ?? 0) < cfg.min_score) continue;
-
-    // 2. Age-Filter.
-    if (item.published_at) {
-      const ageMs = now - new Date(item.published_at).getTime();
-      const ageDays = ageMs / (1000 * 60 * 60 * 24);
-      if (ageDays > cfg.max_age_days) continue;
-    }
-
-    // 3. Dedup.
-    const dedupKey = normalize(item.url) + "|" + normalize(item.title).slice(0, 80);
-    if (seen.has(dedupKey)) continue;
-    seen.add(dedupKey);
-
-    // 4. Keyword-Match nur für T2: User-Buzzwords steuern was reinkommt.
-    //    T1 (Primärquellen) und T3 (Community) bleiben ungefiltert — T3 soll
-    //    Community-News-Sektion ohne harten Filter mit Inhalten füllen.
-    if (keywordTokens.length > 0 && cfg.tier === 2) {
-      const haystack = (item.title + " " + (item.raw.description ?? "")).toLowerCase();
-      const matches = keywordTokens.some((kw) => haystack.includes(kw));
-      if (!matches) continue;
-    }
-
-    passed.push(item);
-  }
-
-  // Sortierung: T1 vor T2 vor T3, dann nach Score, dann nach Datum.
-  passed.sort((a, b) => {
-    if (a.source_tier !== b.source_tier) return a.source_tier - b.source_tier;
-    if ((b.score ?? 0) !== (a.score ?? 0)) return (b.score ?? 0) - (a.score ?? 0);
-    return new Date(b.published_at ?? 0).getTime() - new Date(a.published_at ?? 0).getTime();
-  });
-
-  return passed.slice(0, MAX_FILTERED_ITEMS);
+  if (source.type === "hackernews") aliases.add("Hacker News");
+  if (source.type === "producthunt") aliases.add("Product Hunt");
+  return [...aliases];
 }
 
-function normalize(input: string): string {
-  return input.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 200);
+async function recordSourceHealth(
+  client: SupabaseClient,
+  companyId: string,
+  sourceId: string,
+  itemsFetched: number,
+  itemsAccepted: number,
+  error: string | null,
+) {
+  await client.from("source_health").upsert({
+    company_id: companyId,
+    source_id: sourceId,
+    last_checked_at: new Date().toISOString(),
+    last_success_at: error ? null : new Date().toISOString(),
+    last_error_at: error ? new Date().toISOString() : null,
+    last_error: error,
+    items_fetched: itemsFetched,
+    items_accepted: itemsAccepted,
+  });
 }
 
 async function fetchSource(source: Source): Promise<NewsItem[]> {
   switch (source.type) {
-    case "rss": return await fetchRss(source);
-    case "newsapi": return await fetchNewsApi(source);
-    case "reddit": return await fetchReddit(source);
-    case "hackernews": return await fetchHackerNews(source);
-    case "producthunt": return await fetchProductHunt(source);
-    default: return [];
+    case "rss":
+      return await fetchRss(source);
+    case "newsapi":
+      return await fetchNewsApi(source);
+    case "reddit":
+      return await fetchReddit(source);
+    case "hackernews":
+      return await fetchHackerNews(source);
+    case "producthunt":
+      return await fetchProductHunt(source);
+    default:
+      return [];
   }
 }
 
@@ -179,7 +199,9 @@ async function fetchRss(source: Source): Promise<NewsItem[]> {
       signal: controller.signal,
     });
     clearTimeout(timeout);
-    if (!response.ok) throw new Error(`RSS ${source.url} failed: ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`RSS ${source.url} failed: ${response.status}`);
+    }
     xml = await response.text();
   } catch (err) {
     clearTimeout(timeout);
@@ -187,9 +209,11 @@ async function fetchRss(source: Source): Promise<NewsItem[]> {
   }
   const items: NewsItem[] = [];
   const itemRegex = /<item[\s\S]*?<\/item>|<entry[\s\S]*?<\/entry>/gi;
-  const titleRegex = /<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i;
+  const titleRegex =
+    /<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i;
   const linkRegex = /<link[^>]*?(?:href="([^"]+)"|>([^<]+)<\/link>)/i;
-  const dateRegex = /<(pubDate|published|updated)[^>]*>([\s\S]*?)<\/(pubDate|published|updated)>/i;
+  const dateRegex =
+    /<(pubDate|published|updated)[^>]*>([\s\S]*?)<\/(pubDate|published|updated)>/i;
   const matches = xml.match(itemRegex) ?? [];
   for (const block of matches) {
     const title = block.match(titleRegex)?.[1]?.trim() ?? "";
@@ -215,7 +239,9 @@ function safeIsoDate(dateStr: string): string | null {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return null;
     return d.toISOString();
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 async function fetchNewsApi(source: Source): Promise<NewsItem[]> {
@@ -263,7 +289,9 @@ async function fetchReddit(source: Source): Promise<NewsItem[]> {
   for (const u of urls) {
     try {
       const r = await fetch(u, {
-        headers: { "user-agent": "Mozilla/5.0 (compatible; berlin-saas-digest/1.0)" },
+        headers: {
+          "user-agent": "Mozilla/5.0 (compatible; berlin-saas-digest/1.0)",
+        },
       });
       if (r.ok) {
         response = r;
@@ -274,11 +302,14 @@ async function fetchReddit(source: Source): Promise<NewsItem[]> {
       lastErr = `${u} → ${e instanceof Error ? e.message : String(e)}`;
     }
   }
-  if (!response) throw new Error(`Reddit ${subreddit} failed all proxies: ${lastErr}`);
+  if (!response) {
+    throw new Error(`Reddit ${subreddit} failed all proxies: ${lastErr}`);
+  }
   const xml = await response.text();
   const items: NewsItem[] = [];
   const entryRegex = /<entry[\s\S]*?<\/entry>/gi;
-  const titleRegex = /<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i;
+  const titleRegex =
+    /<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i;
   const linkRegex = /<link[^>]*?href="([^"]+)"/i;
   const updatedRegex = /<updated[^>]*>([\s\S]*?)<\/updated>/i;
   const matches = xml.match(entryRegex) ?? [];
@@ -331,10 +362,14 @@ async function fetchProductHunt(source: Source): Promise<NewsItem[]> {
   // deno-lint-ignore no-explicit-any
   const config = source.config as any;
   const topic = config.topic ?? "";
-  const query = `query Posts($topic: String) { posts(topic: $topic, order: VOTES, first: 20) { edges { node { id name tagline url createdAt votesCount } } } }`;
+  const query =
+    `query Posts($topic: String) { posts(topic: $topic, order: VOTES, first: 20) { edges { node { id name tagline url createdAt votesCount } } } }`;
   const response = await fetch("https://api.producthunt.com/v2/api/graphql", {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
     body: JSON.stringify({ query, variables: { topic } }),
   });
   if (!response.ok) throw new Error(`ProductHunt failed: ${response.status}`);

@@ -1,18 +1,7 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
-
-interface AuthContextValue {
-  session: Session | null;
-  loading: boolean;
-  signOut: () => Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextValue>({
-  session: null,
-  loading: true,
-  signOut: async () => {},
-});
+import { AuthContext } from "./auth-context";
 
 // Wird nach Sign-In aufgerufen: hängt orphaned companies (user_id NULL) an den
 // neuen User. Praktisch für Migration der bestehenden Testdaten beim ersten Login.
@@ -60,8 +49,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  return useContext(AuthContext);
 }

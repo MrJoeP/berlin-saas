@@ -2,7 +2,8 @@ import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/auth-context";
+import { normalizeDomain } from "@/lib/domain";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Field } from "@/components/ui/Input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/Card";
@@ -43,6 +44,21 @@ export function Setup() {
     setError(null);
 
     try {
+      // Dedup-Vorprüfung: existiert für dieses Konto schon eine Firma mit derselben Domain?
+      // RLS scoped die Abfrage automatisch auf die eigenen Firmen.
+      const domain = normalizeDomain(url);
+      const { data: existing } = await supabase.from("companies").select("id, url, name");
+      const match = (existing ?? []).find(
+        (c) => c.url && normalizeDomain(c.url) === domain,
+      );
+      if (match) {
+        setError(
+          `„${match.name ?? domain}" ist für dieses Konto bereits angelegt. Wir öffnen die bestehende Firma statt einer Dublette.`,
+        );
+        setTimeout(() => navigate("/"), 1500);
+        return;
+      }
+
       const initialName = nameFromUrl(url);
       const { data: company, error: companyErr } = await supabase
         .from("companies")

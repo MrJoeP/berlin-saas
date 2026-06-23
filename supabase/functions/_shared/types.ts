@@ -33,6 +33,10 @@ export interface Company {
   industry: string | null;
   niche: string | null;
   keywords: string[];
+  negative_keywords?: string[];
+  product_description?: string | null;
+  icp?: string | null;
+  target_market?: string | null;
   voice_sample: string | null;
   profile_json: CompanyProfile;
   active: boolean;
