@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { ArrowRight, RefreshCw, ChevronDown, ChevronRight, Plus, LogOut, Rss, ExternalLink } from "lucide-react";
 import { NicheNewsDigest } from "@/features/niche-news/NicheNewsDigest";
 import { TopPostDigest, type HookCluster } from "@/features/top-posts/TopPostDigest";
@@ -63,27 +63,6 @@ const TIER_COLORS: Record<1 | 2 | 3, string> = {
   3: "bg-amber-100 text-amber-800 border-amber-300",
 };
 
-function ToolBlock({
-  title, week, color, live = true, children,
-}: {
-  title: string; week: string; color: string; live?: boolean; children: React.ReactNode;
-}) {
-  return (
-    <div className="mb-10">
-      <div className="flex items-center gap-3 mb-4">
-        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full text-white ${color}`}>{week}</span>
-        <h2 className={`text-sm font-semibold ${live ? "" : "text-[var(--color-muted)]"}`}>{title}</h2>
-        {!live && (
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--color-surface)] text-[var(--color-muted)] border border-[var(--color-border)]">
-            Kommt bald
-          </span>
-        )}
-        <div className="flex-1 h-px bg-[var(--color-border)]" />
-      </div>
-      {children}
-    </div>
-  );
-}
 
 const TOP_POST_SOURCES: { name: string; type: string; tier: 1 | 2 | 3; note: string }[] = [
   { name: "Hacker News", type: "Algolia API", tier: 2, note: "score ≥ 50, nach Keywords gefiltert" },
@@ -542,8 +521,6 @@ function JobStatusPanel({ jobs }: { jobs: Job[] }) {
 
 export function Dashboard() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const pitchMode = searchParams.get("pitch") === "1";
   const [company, setCompany] = useState<Company | null>(null);
   const [allCompanies, setAllCompanies] = useState<Company[]>([]);
   const [digests, setDigests] = useState<DigestWithItems[]>([]);
@@ -553,6 +530,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [selectedTool, setSelectedTool] = useState<"niche_news" | "top_post">("niche_news");
   // Map<target_type:target_id, vote-value (-1 oder +1)>
   const [votes, setVotes] = useState<Record<string, -1 | 1>>({});
   const { session, signOut } = useAuth();
@@ -929,53 +907,79 @@ export function Dashboard() {
 
         <KeywordsEditor company={company} onSave={saveCompanyContext} />
 
-        {/* W2: Top-Post-Digest — pitchMode hides this to preserve the W1 storyline */}
-        {!pitchMode && <ToolBlock title="Top-Post-Digest" week="W2" color="bg-emerald-600">
-          <TopPostSourcePanel items={latestTopPost?.items ?? []} />
-          {latestTopPost ? (
-            <>
-              {renderTopPost(latestTopPost)}
-              <OlderDigests digests={topPostDigests.slice(1)} renderDigest={renderTopPost} />
-            </>
-          ) : (
-            <Card>
-              <CardContent className="py-8 text-center">
-                <p className="text-sm text-[var(--color-muted)]">
-                  Noch kein Top-Post-Digest. Läuft automatisch beim nächsten Cron-Job (täglich 06:30).
-                </p>
-              </CardContent>
-            </Card>
-          )}
-        </ToolBlock>}
+        {/* Tool-Auswahl */}
+        <div className="flex gap-0 mb-6 border-b border-[var(--color-border)]">
+          {(["niche_news", "top_post"] as const).map((tool) => {
+            const label = tool === "niche_news" ? "Niche News" : "Top Posts";
+            const active = selectedTool === tool;
+            return (
+              <button
+                key={tool}
+                type="button"
+                onClick={() => setSelectedTool(tool)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  active
+                    ? "border-[var(--color-accent)] text-[var(--color-fg)]"
+                    : "border-transparent text-[var(--color-muted)] hover:text-[var(--color-fg)]"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
 
-        {/* W1: Niche-News-Digest */}
-        <ToolBlock title="Niche-News-Digest" week="W1" color="bg-[var(--color-accent)]">
-          <JobStatusPanel jobs={jobs} />
-          <SourceManager sources={sourceRows} health={sourceHealth} onToggle={toggleSource} onAddRss={addRssSource} />
-          {latestNicheNews ? (
-            <>
-              {renderNicheNews(latestNicheNews)}
-              <OlderDigests digests={nicheNewsDigests.slice(1)} renderDigest={renderNicheNews} />
-            </>
-          ) : (
-            <Card>
-              <CardContent className="text-center py-12">
-                <p className="text-sm text-[var(--color-fg)] mb-2">
-                  {company.industry
-                    ? "Bot scraped Quellen und baut den ersten Digest. Dauert ein paar Minuten."
-                    : "Bot analysiert deine Website, klassifiziert die Industrie und picked Sources."}
-                </p>
-                <p className="text-xs text-[var(--color-muted)] mb-6">
-                  Setup von {formatDate(company.created_at)}. Aktualisiere die Seite in 1 bis 2 Minuten.
-                </p>
-                <Button variant="secondary" onClick={triggerRun} disabled={triggering}>
-                  <ArrowRight className="w-4 h-4 mr-1" />
-                  {triggering ? "Queue..." : "Founder Briefing generieren"}
-                </Button>
-              </CardContent>
-            </Card>
-          )}
-        </ToolBlock>
+        {/* Niche News */}
+        {selectedTool === "niche_news" && (
+          <div>
+            <JobStatusPanel jobs={jobs} />
+            <SourceManager sources={sourceRows} health={sourceHealth} onToggle={toggleSource} onAddRss={addRssSource} />
+            {latestNicheNews ? (
+              <>
+                {renderNicheNews(latestNicheNews)}
+                <OlderDigests digests={nicheNewsDigests.slice(1)} renderDigest={renderNicheNews} />
+              </>
+            ) : (
+              <Card>
+                <CardContent className="text-center py-12">
+                  <p className="text-sm text-[var(--color-fg)] mb-2">
+                    {company.industry
+                      ? "Bot scraped Quellen und baut den ersten Digest. Dauert ein paar Minuten."
+                      : "Bot analysiert deine Website, klassifiziert die Industrie und picked Sources."}
+                  </p>
+                  <p className="text-xs text-[var(--color-muted)] mb-6">
+                    Setup von {formatDate(company.created_at)}. Aktualisiere die Seite in 1 bis 2 Minuten.
+                  </p>
+                  <Button variant="secondary" onClick={triggerRun} disabled={triggering}>
+                    <ArrowRight className="w-4 h-4 mr-1" />
+                    {triggering ? "Queue..." : "Founder Briefing generieren"}
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
+
+        {/* Top Posts */}
+        {selectedTool === "top_post" && (
+          <div>
+            <TopPostSourcePanel items={latestTopPost?.items ?? []} />
+            {latestTopPost ? (
+              <>
+                {renderTopPost(latestTopPost)}
+                <OlderDigests digests={topPostDigests.slice(1)} renderDigest={renderTopPost} />
+              </>
+            ) : (
+              <Card>
+                <CardContent className="py-8 text-center">
+                  <p className="text-sm text-[var(--color-muted)]">
+                    Noch kein Top-Post-Digest. Läuft automatisch beim nächsten Cron-Job (täglich 06:30).
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
 
       </div>
     </div>
