@@ -8,6 +8,8 @@ import { Job, JobType } from "./types.ts";
 import { handle as scrapeCompany } from "../scrape-company/handler.ts";
 import { handle as scrapeNews } from "../scrape-news/handler.ts";
 import { handle as generateDigest } from "../generate-digest/handler.ts";
+import { handle as topPostScrape } from "../tool-02-top-posts/top-post-scrape.ts";
+import { handle as topPostCluster } from "../tool-02-top-posts/top-post-cluster.ts";
 
 export type JobHandler = (
   job: Job,
@@ -18,6 +20,8 @@ const handlers: Record<JobType, JobHandler> = {
   scrape_company: scrapeCompany,
   niche_news_scrape: scrapeNews,
   niche_news_cluster: generateDigest,
+  top_post_scrape: topPostScrape,
+  top_post_cluster: topPostCluster,
 };
 
 export async function dispatch(job: Job, client: SupabaseClient): Promise<Record<string, unknown>> {

@@ -757,6 +757,19 @@ export function Dashboard() {
     await loadJobs(company.id);
   }
 
+  async function triggerTopPost() {
+    if (!company) return;
+    setTriggering(true);
+    const { data, error } = await supabase
+      .from("jobs")
+      .insert({ type: "top_post_scrape", company_id: company.id })
+      .select()
+      .single();
+    if (!error && data) setJobs((prev) => [data as Job, ...prev]);
+    setTriggering(false);
+    await loadJobs(company.id);
+  }
+
   async function toggleFrequency() {
     if (!company) return;
     const next = company.scan_frequency === "daily" ? "weekly" : "daily";
@@ -971,10 +984,17 @@ export function Dashboard() {
               </>
             ) : (
               <Card>
-                <CardContent className="py-8 text-center">
-                  <p className="text-sm text-[var(--color-muted)]">
-                    Noch kein Top-Post-Digest. Läuft automatisch beim nächsten Cron-Job (täglich 06:30).
+                <CardContent className="text-center py-12">
+                  <p className="text-sm text-[var(--color-fg)] mb-2">
+                    Noch kein Top-Post-Digest. Scrapet HN, Reddit, Google News, Dev.to der letzten 7 Tage.
                   </p>
+                  <p className="text-xs text-[var(--color-muted)] mb-6">
+                    Dauert ca. 1–2 Minuten.
+                  </p>
+                  <Button variant="secondary" onClick={triggerTopPost} disabled={triggering}>
+                    <ArrowRight className="w-4 h-4 mr-1" />
+                    {triggering ? "Queue..." : "Top-Post-Digest generieren"}
+                  </Button>
                 </CardContent>
               </Card>
             )}

@@ -5,7 +5,9 @@ export type JobStatus = "pending" | "running" | "completed" | "failed";
 export type JobType =
   | "scrape_company"
   | "niche_news_scrape"
-  | "niche_news_cluster";
+  | "niche_news_cluster"
+  | "top_post_scrape"
+  | "top_post_cluster";
 
 export interface Job {
   id: string;
