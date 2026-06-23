@@ -8,7 +8,9 @@ import {
   type Company,
   type Digest,
   type DigestItem,
+  type Job,
   type Source,
+  type SourceHealth,
   type Vote,
 } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
@@ -32,6 +34,14 @@ interface CompanySourceRow {
   active: boolean;
   sources: Source | null;
 }
+
+type CompanyContextDraft = {
+  product_description: string;
+  icp: string;
+  target_market: string;
+  keywords: string;
+  negative_keywords: string;
+};
 
 const TYPE_LABELS: Record<Digest["type"], string> = {
   niche_news: "Niche News",
@@ -78,8 +88,10 @@ function ToolBlock({
 const TOP_POST_SOURCES: { name: string; type: string; tier: 1 | 2 | 3; note: string }[] = [
   { name: "Hacker News", type: "Algolia API", tier: 2, note: "score ≥ 50, nach Keywords gefiltert" },
   { name: "Product Hunt", type: "RSS", tier: 2, note: "neueste Launches, nach Keywords gefiltert" },
-  { name: "LinkedIn (via Google)", type: "News RSS", tier: 2, note: "site:linkedin.com/posts + company + keywords" },
-  { name: "Dev.to", type: "Tag-Feed", tier: 3, note: "erster Keyword-Tag als Slug" },
+  { name: "Reddit", type: "Search API", tier: 3, note: "Top Posts der Woche, echte Upvote-Scores" },
+  { name: "Twitter/X", type: "Nitter RSS", tier: 2, note: "min. 100 Likes, kein Retweet" },
+  { name: "LinkedIn (via Google)", type: "News RSS", tier: 2, note: "site:linkedin.com/posts + Keywords" },
+  { name: "Dev.to", type: "API", tier: 3, note: "Top Artikel nach Keyword-Tag, Reactions-Score" },
 ];
 
 function TopPostSourcePanel({ items }: { items: DigestItem[] }) {
@@ -203,30 +215,34 @@ function OlderDigests({
 }
 
 function KeywordsEditor({
-  keywords,
+  company,
   onSave,
 }: {
-  keywords: string[];
-  onSave: (next: string[]) => Promise<void>;
+  company: Company;
+  onSave: (next: {
+    product_description: string | null;
+    icp: string | null;
+    target_market: string | null;
+    keywords: string[];
+    negative_keywords: string[];
+  }) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(keywords.join(", "));
+  const [draft, setDraft] = useState<CompanyContextDraft>(() => contextDraftFromCompany(company));
 
   function start() {
-    setDraft(keywords.join(", "));
+    setDraft(contextDraftFromCompany(company));
     setEditing(true);
   }
 
   async function commit() {
-    const next = Array.from(
-      new Set(
-        draft
-          .split(",")
-          .map((k) => k.trim())
-          .filter(Boolean),
-      ),
-    );
-    await onSave(next);
+    await onSave({
+      product_description: emptyToNull(draft.product_description),
+      icp: emptyToNull(draft.icp),
+      target_market: emptyToNull(draft.target_market),
+      keywords: parseCommaList(draft.keywords),
+      negative_keywords: parseCommaList(draft.negative_keywords),
+    });
     setEditing(false);
   }
 
@@ -234,16 +250,45 @@ function KeywordsEditor({
     return (
       <div className="mb-6 p-3 border border-[var(--color-accent)] rounded-md bg-[var(--color-bg)]">
         <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-2">
-          Buzzwords (komma-getrennt) — steuern Pre-Filter & Themen-Fokus
+          Company Context
         </div>
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          className="w-full text-sm px-2 py-1.5 rounded border border-[var(--color-border)] bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
-          rows={2}
-          placeholder="z.B. SEO Agentur, Content SEO, AI Overviews, AIO, Backlinks, Keyword Research"
-          autoFocus
-        />
+        <div className="grid gap-2">
+          <textarea
+            value={draft.product_description}
+            onChange={(e) => setDraft((prev) => ({ ...prev, product_description: e.target.value }))}
+            className="w-full text-sm px-2 py-1.5 rounded border border-[var(--color-border)] bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+            rows={2}
+            placeholder="Produkt in einem Satz"
+            autoFocus
+          />
+          <textarea
+            value={draft.icp}
+            onChange={(e) => setDraft((prev) => ({ ...prev, icp: e.target.value }))}
+            className="w-full text-sm px-2 py-1.5 rounded border border-[var(--color-border)] bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+            rows={2}
+            placeholder="ICP / Zielkunden"
+          />
+          <input
+            value={draft.target_market}
+            onChange={(e) => setDraft((prev) => ({ ...prev, target_market: e.target.value }))}
+            className="w-full text-sm px-2 py-1.5 rounded border border-[var(--color-border)] bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+            placeholder="Zielmarkt, z.B. DACH, EU B2B SaaS, English-speaking founders"
+          />
+          <textarea
+            value={draft.keywords}
+            onChange={(e) => setDraft((prev) => ({ ...prev, keywords: e.target.value }))}
+            className="w-full text-sm px-2 py-1.5 rounded border border-[var(--color-border)] bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+            rows={2}
+            placeholder="Relevante Keywords, komma-getrennt"
+          />
+          <textarea
+            value={draft.negative_keywords}
+            onChange={(e) => setDraft((prev) => ({ ...prev, negative_keywords: e.target.value }))}
+            className="w-full text-sm px-2 py-1.5 rounded border border-[var(--color-border)] bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+            rows={2}
+            placeholder="Irrelevante Begriffe, komma-getrennt"
+          />
+        </div>
         <div className="flex gap-2 mt-2 justify-end">
           <button
             type="button"
@@ -261,50 +306,79 @@ function KeywordsEditor({
           </button>
         </div>
         <p className="text-[10px] text-[var(--color-muted)] mt-2">
-          Wirkt ab dem nächsten Scrape. Tier-2- und Tier-3-Quellen werden nach diesen Begriffen gefiltert. Tier-1 (Primärquellen) bleiben immer rein.
+          Wirkt ab dem nächsten Founder Briefing. Negative Keywords filtern Rauschen vor der Analyse.
         </p>
       </div>
     );
   }
 
+  const keywords = company.keywords ?? [];
+  const negative = company.negative_keywords ?? [];
   return (
-    <div className="mb-6 flex items-start gap-2 flex-wrap">
-      <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)] mt-1.5">
-        Buzzwords:
-      </span>
-      <div className="flex flex-wrap gap-1.5 flex-1 min-w-0">
-        {keywords.length === 0 ? (
-          <span className="text-xs text-[var(--color-muted)] italic mt-1.5">
-            Keine gesetzt — alle Quellen-Items kommen rein.
-          </span>
-        ) : (
-          keywords.map((k) => (
-            <span
-              key={k}
-              className="text-xs px-2 py-1 rounded-full bg-[var(--color-surface)] text-[var(--color-fg)] border border-[var(--color-border)]"
-            >
-              {k}
-            </span>
-          ))
-        )}
+    <div className="mb-6 rounded-md border border-[var(--color-border)] p-3 bg-white">
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)] mb-1">
+            Company Context
+          </div>
+          <p className="text-sm text-[var(--color-fg)]">
+            {company.product_description || company.tagline || "Noch keine Produktbeschreibung gesetzt."}
+          </p>
+          <p className="text-xs text-[var(--color-muted)] mt-1">
+            {company.icp || "ICP fehlt"}{company.target_market ? ` · ${company.target_market}` : ""}
+          </p>
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {keywords.map((k) => (
+              <span key={k} className="text-xs px-2 py-1 rounded-full bg-[var(--color-surface)] text-[var(--color-fg)] border border-[var(--color-border)]">
+                {k}
+              </span>
+            ))}
+            {negative.map((k) => (
+              <span key={k} className="text-xs px-2 py-1 rounded-full bg-red-50 text-red-700 border border-red-200">
+                -{k}
+              </span>
+            ))}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={start}
+          className="text-xs px-2.5 py-1 rounded border border-[var(--color-border)] text-[var(--color-fg)] hover:bg-[var(--color-surface)]"
+        >
+          Bearbeiten
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={start}
-        className="text-xs px-2.5 py-1 rounded border border-[var(--color-border)] text-[var(--color-fg)] hover:bg-[var(--color-surface)]"
-      >
-        Bearbeiten
-      </button>
     </div>
   );
 }
 
+function contextDraftFromCompany(company: Company): CompanyContextDraft {
+  return {
+    product_description: company.product_description ?? "",
+    icp: company.icp ?? "",
+    target_market: company.target_market ?? "",
+    keywords: (company.keywords ?? []).join(", "),
+    negative_keywords: (company.negative_keywords ?? []).join(", "),
+  };
+}
+
+function parseCommaList(value: string): string[] {
+  return Array.from(new Set(value.split(",").map((item) => item.trim()).filter(Boolean)));
+}
+
+function emptyToNull(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
 function SourceManager({
   sources,
+  health,
   onToggle,
   onAddRss,
 }: {
   sources: CompanySourceRow[];
+  health: Record<string, SourceHealth>;
   onToggle: (sourceId: string, active: boolean) => Promise<void>;
   onAddRss: (name: string, url: string) => Promise<void>;
 }) {
@@ -365,6 +439,10 @@ function SourceManager({
               sorted.map((row) => {
                 const source = row.sources;
                 const tier = (source?.tier ?? 3) as 1 | 2 | 3;
+                const sourceHealth = health[row.source_id];
+                const acceptedRate = sourceHealth && sourceHealth.items_fetched > 0
+                  ? Math.round((sourceHealth.items_accepted / sourceHealth.items_fetched) * 100)
+                  : null;
                 return (
                   <div
                     key={row.source_id}
@@ -414,6 +492,16 @@ function SourceManager({
                           <ExternalLink className="w-3 h-3 shrink-0" />
                         </a>
                       )}
+                      {sourceHealth && (
+                        <div className="mt-1 flex flex-wrap gap-1.5 text-[10px] text-[var(--color-muted)]">
+                          <span>
+                            {sourceHealth.last_error ? "Fehler" : "OK"}
+                          </span>
+                          <span>· {sourceHealth.items_accepted}/{sourceHealth.items_fetched} akzeptiert</span>
+                          {acceptedRate !== null && <span>· {acceptedRate}% Trefferquote</span>}
+                          {sourceHealth.last_error && <span className="text-red-700">· {sourceHealth.last_error}</span>}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -459,6 +547,45 @@ function SourceManager({
   );
 }
 
+function JobStatusPanel({ jobs }: { jobs: Job[] }) {
+  const active = jobs.find((job) => job.status === "running" || job.status === "pending");
+  const latest = active ?? jobs[0] ?? null;
+  if (!latest) return null;
+
+  const label = latest.status === "running"
+    ? "Läuft"
+    : latest.status === "pending"
+    ? "In Queue"
+    : latest.status === "completed"
+    ? "Fertig"
+    : "Fehler";
+  const tone = latest.status === "failed"
+    ? "bg-red-50 text-red-800 border-red-200"
+    : latest.status === "completed"
+    ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+    : "bg-blue-50 text-blue-800 border-blue-200";
+
+  return (
+    <div className={`mb-4 rounded-md border px-3 py-2 ${tone}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs font-semibold">
+            Founder Briefing: {label}
+          </div>
+          <p className="text-xs opacity-80 mt-0.5">
+            {latest.type}
+            {latest.started_at ? ` · gestartet ${formatDate(latest.started_at)}` : ` · erstellt ${formatDate(latest.created_at)}`}
+          </p>
+          {latest.error && <p className="text-xs mt-1">{latest.error}</p>}
+        </div>
+        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded border border-current opacity-80">
+          {latest.retry_count}/{latest.max_retries}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -467,6 +594,8 @@ export function Dashboard() {
   const [allCompanies, setAllCompanies] = useState<Company[]>([]);
   const [digests, setDigests] = useState<DigestWithItems[]>([]);
   const [sourceRows, setSourceRows] = useState<CompanySourceRow[]>([]);
+  const [sourceHealth, setSourceHealth] = useState<Record<string, SourceHealth>>({});
+  const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -542,6 +671,26 @@ export function Dashboard() {
     setSourceRows((data ?? []) as unknown as CompanySourceRow[]);
   }, []);
 
+  const loadSourceHealth = useCallback(async (companyId: string) => {
+    const { data } = await supabase
+      .from("source_health")
+      .select("*")
+      .eq("company_id", companyId);
+    const map: Record<string, SourceHealth> = {};
+    for (const row of (data ?? []) as SourceHealth[]) map[row.source_id] = row;
+    setSourceHealth(map);
+  }, []);
+
+  const loadJobs = useCallback(async (companyId: string) => {
+    const { data } = await supabase
+      .from("jobs")
+      .select("*")
+      .eq("company_id", companyId)
+      .order("created_at", { ascending: false })
+      .limit(8);
+    setJobs((data ?? []) as Job[]);
+  }, []);
+
   const loadDigestsForCompany = useCallback(async (companyId: string) => {
     const { data: digestData } = await supabase
       .from("digests")
@@ -591,10 +740,12 @@ export function Dashboard() {
     await Promise.all([
       loadDigestsForCompany(currentCompany.id),
       loadSources(currentCompany.id),
+      loadSourceHealth(currentCompany.id),
+      loadJobs(currentCompany.id),
       loadVotes(),
     ]);
     setLoading(false);
-  }, [company?.id, loadDigestsForCompany, loadSources, loadVotes, navigate]);
+  }, [company?.id, loadDigestsForCompany, loadJobs, loadSourceHealth, loadSources, loadVotes, navigate]);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -603,14 +754,30 @@ export function Dashboard() {
     return () => window.clearTimeout(id);
   }, [loadData]);
 
+  useEffect(() => {
+    if (!company || !jobs.some((job) => job.status === "pending" || job.status === "running")) return;
+    const id = window.setInterval(() => {
+      void Promise.all([
+        loadJobs(company.id),
+        loadDigestsForCompany(company.id),
+        loadSourceHealth(company.id),
+      ]);
+    }, 2500);
+    return () => window.clearInterval(id);
+  }, [company, jobs, loadDigestsForCompany, loadJobs, loadSourceHealth]);
+
   async function switchCompany(newCompany: Company) {
     setCompany(newCompany);
     setDigests([]);
     setSourceRows([]);
+    setSourceHealth({});
+    setJobs([]);
     setLoading(true);
     await Promise.all([
       loadDigestsForCompany(newCompany.id),
       loadSources(newCompany.id),
+      loadSourceHealth(newCompany.id),
+      loadJobs(newCompany.id),
       loadVotes(),
     ]);
     setLoading(false);
@@ -642,19 +809,20 @@ export function Dashboard() {
       p_url: rssUrl,
     });
     if (error) throw error;
-    await loadSources(company.id);
+    await Promise.all([loadSources(company.id), loadSourceHealth(company.id)]);
   }
 
   async function triggerRun() {
     if (!company) return;
     setTriggering(true);
-    await supabase
+    const { data, error } = await supabase
       .from("jobs")
-      .insert({ type: "niche_news_scrape", company_id: company.id });
-    setTimeout(() => {
-      setTriggering(false);
-      loadData();
-    }, 3000);
+      .insert({ type: "niche_news_scrape", company_id: company.id })
+      .select()
+      .single();
+    if (!error && data) setJobs((prev) => [data as Job, ...prev]);
+    setTriggering(false);
+    await loadJobs(company.id);
   }
 
   async function toggleFrequency() {
@@ -665,11 +833,17 @@ export function Dashboard() {
     await supabase.from("companies").update({ scan_frequency: next }).eq("id", company.id);
   }
 
-  async function saveKeywords(newKeywords: string[]) {
+  async function saveCompanyContext(next: {
+    product_description: string | null;
+    icp: string | null;
+    target_market: string | null;
+    keywords: string[];
+    negative_keywords: string[];
+  }) {
     if (!company) return;
-    setCompany({ ...company, keywords: newKeywords });
-    setAllCompanies((prev) => prev.map((c) => (c.id === company.id ? { ...c, keywords: newKeywords } : c)));
-    await supabase.from("companies").update({ keywords: newKeywords }).eq("id", company.id);
+    setCompany({ ...company, ...next });
+    setAllCompanies((prev) => prev.map((c) => (c.id === company.id ? { ...c, ...next } : c)));
+    await supabase.from("companies").update(next).eq("id", company.id);
   }
 
   if (loading) {
@@ -791,7 +965,7 @@ export function Dashboard() {
             </Button>
             <Button variant="secondary" size="sm" onClick={triggerRun} disabled={triggering}>
               <RefreshCw className={`w-4 h-4 mr-1 ${triggering ? "animate-spin" : ""}`} />
-              {triggering ? "Triggered..." : "Run now"}
+              {triggering ? "Queued..." : "Generate Briefing"}
             </Button>
             <Button variant="ghost" size="sm" onClick={signOut} title="Logout">
               <LogOut className="w-4 h-4" />
@@ -799,7 +973,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        <KeywordsEditor keywords={company.keywords} onSave={saveKeywords} />
+        <KeywordsEditor company={company} onSave={saveCompanyContext} />
 
         {/* W2: Top-Post-Digest — pitchMode hides this to preserve the W1 storyline */}
         {!pitchMode && <ToolBlock title="Top-Post-Digest" week="W2" color="bg-emerald-600">
@@ -822,7 +996,8 @@ export function Dashboard() {
 
         {/* W1: Niche-News-Digest */}
         <ToolBlock title="Niche-News-Digest" week="W1" color="bg-[var(--color-accent)]">
-          <SourceManager sources={sourceRows} onToggle={toggleSource} onAddRss={addRssSource} />
+          <JobStatusPanel jobs={jobs} />
+          <SourceManager sources={sourceRows} health={sourceHealth} onToggle={toggleSource} onAddRss={addRssSource} />
           {latestNicheNews ? (
             <>
               {renderNicheNews(latestNicheNews)}
@@ -841,7 +1016,7 @@ export function Dashboard() {
                 </p>
                 <Button variant="secondary" onClick={triggerRun} disabled={triggering}>
                   <ArrowRight className="w-4 h-4 mr-1" />
-                  {triggering ? "Job läuft..." : "Manuell neu anstoßen"}
+                  {triggering ? "Queue..." : "Founder Briefing generieren"}
                 </Button>
               </CardContent>
             </Card>

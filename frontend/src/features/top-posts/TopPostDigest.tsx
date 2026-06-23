@@ -3,8 +3,13 @@ import { useState } from "react";
 
 export interface HookCluster {
   pattern_name: string;
+  format_typ?: string;
   was_geht_viral: string;
   warum_es_funktioniert: string;
+  hook_einstieg?: string;
+  zielgruppe_reaktion?: string;
+  plattform_staerke?: string;
+  plattform_mix?: string[];
   winkel_fuer_eigenen_post: string;
   beispiele: {
     title: string;
@@ -16,6 +21,40 @@ export interface HookCluster {
 
 export interface TopPostDigestProps {
   clusterAnalyses: HookCluster[];
+}
+
+const FORMAT_LABELS: Record<string, string> = {
+  frage: "Frage",
+  stat: "Stat",
+  story: "Story",
+  liste: "Liste",
+  kontroverse: "Kontroverse",
+  insight: "Insight",
+  case_study: "Case Study",
+  news_hook: "News Hook",
+};
+
+const FORMAT_COLORS: Record<string, string> = {
+  frage: "bg-blue-50 text-blue-700 border-blue-200",
+  stat: "bg-amber-50 text-amber-700 border-amber-200",
+  story: "bg-purple-50 text-purple-700 border-purple-200",
+  liste: "bg-slate-50 text-slate-700 border-slate-200",
+  kontroverse: "bg-red-50 text-red-700 border-red-200",
+  insight: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  case_study: "bg-orange-50 text-orange-700 border-orange-200",
+  news_hook: "bg-sky-50 text-sky-700 border-sky-200",
+};
+
+function AnalysisRow({ label, value }: { label: string; value: string }) {
+  if (!value) return null;
+  return (
+    <div>
+      <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1">
+        {label}
+      </div>
+      <p className="text-sm leading-relaxed text-[var(--color-fg)]">{value}</p>
+    </div>
+  );
 }
 
 export function TopPostDigest({ clusterAnalyses }: TopPostDigestProps) {
@@ -35,6 +74,10 @@ export function TopPostDigest({ clusterAnalyses }: TopPostDigestProps) {
     <div className="space-y-1">
       {clusterAnalyses.map((cluster) => {
         const isOpen = !!open[cluster.pattern_name];
+        const fmt = cluster.format_typ?.toLowerCase() ?? "";
+        const fmtLabel = FORMAT_LABELS[fmt];
+        const fmtColor = FORMAT_COLORS[fmt] ?? "bg-[var(--color-surface)] text-[var(--color-muted)] border-[var(--color-border)]";
+
         return (
           <div
             key={cluster.pattern_name}
@@ -51,6 +94,16 @@ export function TopPostDigest({ clusterAnalyses }: TopPostDigestProps) {
                 <ChevronRight className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
               )}
               <span className="text-sm font-semibold flex-1 truncate">{cluster.pattern_name}</span>
+              {fmtLabel && (
+                <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded border ${fmtColor}`}>
+                  {fmtLabel}
+                </span>
+              )}
+              {cluster.plattform_mix && cluster.plattform_mix.length > 1 && (
+                <span className="shrink-0 text-[10px] text-[var(--color-muted)]">
+                  {cluster.plattform_mix.length} Quellen
+                </span>
+              )}
               <span className="shrink-0 text-xs text-[var(--color-muted)] tabular-nums">
                 {cluster.beispiele?.length ?? 0} Posts
               </span>
@@ -58,27 +111,22 @@ export function TopPostDigest({ clusterAnalyses }: TopPostDigestProps) {
 
             {isOpen && (
               <div className="px-4 pb-4 pt-3 border-t border-[var(--color-border)] space-y-4">
-                {cluster.was_geht_viral && (
-                  <div>
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1">
-                      Was viral geht
-                    </div>
-                    <p className="text-sm leading-relaxed text-[var(--color-fg)]">
-                      {cluster.was_geht_viral}
-                    </p>
+                {/* Platform mix */}
+                {cluster.plattform_mix && cluster.plattform_mix.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {cluster.plattform_mix.map(p => (
+                      <span key={p} className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-muted)]">
+                        {p}
+                      </span>
+                    ))}
                   </div>
                 )}
 
-                {cluster.warum_es_funktioniert && (
-                  <div>
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1">
-                      Warum es funktioniert
-                    </div>
-                    <p className="text-sm leading-relaxed text-[var(--color-fg)]">
-                      {cluster.warum_es_funktioniert}
-                    </p>
-                  </div>
-                )}
+                <AnalysisRow label="Was viral geht" value={cluster.was_geht_viral} />
+                <AnalysisRow label="Hook-Einstieg" value={cluster.hook_einstieg ?? ""} />
+                <AnalysisRow label="Warum es funktioniert" value={cluster.warum_es_funktioniert} />
+                <AnalysisRow label="Zielgruppe" value={cluster.zielgruppe_reaktion ?? ""} />
+                <AnalysisRow label="Beste Plattform" value={cluster.plattform_staerke ?? ""} />
 
                 {cluster.winkel_fuer_eigenen_post && (
                   <div className="p-3 rounded-md bg-emerald-50 border border-emerald-200">
