@@ -112,7 +112,14 @@ export function TopPostDigest({ clusterAnalyses }: TopPostDigestProps) {
               ) : (
                 <ChevronRight className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
               )}
-              <span className="text-sm font-semibold flex-1 truncate">{cluster.pattern_name}</span>
+              <span className="flex-1 min-w-0">
+                <span className="text-sm font-semibold block truncate">{cluster.pattern_name}</span>
+                {!isOpen && cluster.beispiele?.length > 0 && (
+                  <span className="text-[11px] text-[var(--color-muted)] block truncate">
+                    {cluster.beispiele.slice(0, 2).map(b => b.title).join(" · ")}
+                  </span>
+                )}
+              </span>
               {fmtLabel && (
                 <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded border ${fmtColor}`}>
                   {fmtLabel}
