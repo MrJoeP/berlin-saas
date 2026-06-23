@@ -71,7 +71,27 @@ export function TopPostDigest({ clusterAnalyses }: TopPostDigestProps) {
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-4">
+      {/* Übersicht aller Muster */}
+      <div className="flex flex-wrap gap-1.5">
+        {clusterAnalyses.map((cluster, i) => {
+          const fmt = cluster.format_typ?.toLowerCase() ?? "";
+          const fmtColor = FORMAT_COLORS[fmt] ?? "bg-[var(--color-surface)] text-[var(--color-muted)] border-[var(--color-border)]";
+          return (
+            <button
+              key={cluster.pattern_name}
+              type="button"
+              onClick={() => setOpen((prev) => ({ ...prev, [cluster.pattern_name]: true }))}
+              className={`text-xs px-2.5 py-1 rounded-full border font-medium transition-colors hover:opacity-80 ${fmtColor}`}
+            >
+              <span className="text-[10px] text-[var(--color-muted)] mr-1">{i + 1}.</span>
+              {cluster.pattern_name}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="space-y-1">
       {clusterAnalyses.map((cluster) => {
         const isOpen = !!open[cluster.pattern_name];
         const fmt = cluster.format_typ?.toLowerCase() ?? "";
@@ -174,6 +194,7 @@ export function TopPostDigest({ clusterAnalyses }: TopPostDigestProps) {
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
