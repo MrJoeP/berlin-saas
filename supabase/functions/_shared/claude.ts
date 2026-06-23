@@ -91,16 +91,27 @@ export async function callClaudeJSON<T>(options: ClaudeCallOptions): Promise<T> 
     system: (options.system ?? "") +
       "\n\nResponse MUST be valid JSON only, no prose, no markdown fences.",
   });
+  const candidate = extractJsonBlock(response.content);
   try {
-    const cleaned = response.content
-      .replace(/^```json\s*/i, "")
-      .replace(/^```\s*/i, "")
-      .replace(/```\s*$/i, "")
-      .trim();
-    return JSON.parse(cleaned) as T;
-  } catch (err) {
+    return JSON.parse(candidate) as T;
+  } catch (_err) {
     throw new Error(`Claude-Response war kein valides JSON: ${response.content.slice(0, 200)}`);
   }
+}
+
+// Robuste JSON-Extraktion: Haiku wrappt trotz Anweisung oft in ```json-Fences
+// oder schreibt Prosa drumherum. Wir ziehen den Fence-Inhalt raus (auch mittendrin)
+// und schneiden auf das äußerste {...}. Fängt die häufigen Fence- und Prosa-Fälle ab.
+function extractJsonBlock(raw: string): string {
+  let s = raw.trim();
+  const fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) s = fence[1].trim();
+  const first = s.indexOf("{");
+  const last = s.lastIndexOf("}");
+  if (first !== -1 && last !== -1 && last > first) {
+    s = s.slice(first, last + 1);
+  }
+  return s;
 }
 
 export { DEFAULT_MODEL, SONNET_MODEL };

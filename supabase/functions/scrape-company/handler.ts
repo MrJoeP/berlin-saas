@@ -82,14 +82,13 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
 
   // Auto-Picking der Sources passend zur Industrie.
   let sourcesAdded = 0;
-  let existingSources: { source_id: string }[] | null = null;
-  if (validIndustry) {
-    const res = await client
-      .from("company_sources")
-      .select("source_id")
-      .eq("company_id", company.id);
-    existingSources = res.data;
+  const existingRes = await client
+    .from("company_sources")
+    .select("source_id")
+    .eq("company_id", company.id);
+  const existingSources = existingRes.data;
 
+  if (validIndustry) {
     if (!existingSources || existingSources.length === 0) {
       const { data: matchingSources } = await client
         .from("sources")
@@ -142,6 +141,7 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
     company_id: company.id,
     profile,
     industry: validIndustry,
+    has_sources: Boolean(hasAnySources),
     sources_added: sourcesAdded,
     competitors_scraped: competitors?.length ?? 0,
   };

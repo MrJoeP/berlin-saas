@@ -11,11 +11,22 @@
 //   5. cluster_analyses als jsonb in digests, plus digest_items + knowledge_entries.
 
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { Job, NewsItem, DigestCluster, Company } from "../_shared/types.ts";
+import { Company, DigestCluster, Job, NewsItem } from "../_shared/types.ts";
 import { callClaudeJSON, DEFAULT_MODEL } from "../_shared/claude.ts";
 import { fetchArticleBody } from "../_shared/article_body.ts";
+import {
+  type ClusterSignalMetrics,
+  type ClusterVoteSignal,
+  computeConfidence,
+  computeSignalMetrics,
+  type Confidence,
+  countTrendStreak,
+  prepareClusters,
+  type TrendMemoryEntry,
+} from "../_shared/digest_quality.ts";
 
-const CLUSTERING_PROMPT = `Du erhältst eine Liste von News-Items aus verschiedenen Quellen mit Quellen-Tier (1=Primärquelle, 2=Editorial, 3=Community).
+const CLUSTERING_PROMPT =
+  `Du erhältst eine Liste von News-Items aus verschiedenen Quellen mit Quellen-Tier (1=Primärquelle, 2=Editorial, 3=Community).
 
 Clustere die Items nach inhaltlichen Themen. 8 bis 14 Cluster (je mehr unterschiedliche Themen es gibt, desto mehr Cluster). Priorisiere Themen mit Tier-1- oder Tier-2-Quellen. Bevorzuge feinere Themen-Trennung — lieber zwei spezifische Cluster als einen breiten. Items mit nicht eindeutigem Theme oder reines Off-Topic-Geschnatter weglassen.
 
@@ -26,40 +37,103 @@ Antworte nur mit JSON:
   ]
 }`;
 
-type Confidence = "verified" | "editorial" | "community";
-
 interface ClusterAnalysis {
   cluster_name: string;
   confidence: Confidence;
+  confidence_reason: string;
+  signal_metrics: ClusterSignalMetrics;
   was_passiert: string;
+  warum_relevant: string;
+  einordnung: string;
+  next_move: string;
+  offene_fragen: string[];
   key_quotes: { quote: string; source: string; url: string }[];
   trend_streak: number;
 }
 
-export async function handle(job: Job, client: SupabaseClient): Promise<Record<string, unknown>> {
-  if (!job.company_id) throw new Error("niche_news_cluster benötigt company_id.");
+export async function handle(
+  job: Job,
+  client: SupabaseClient,
+): Promise<Record<string, unknown>> {
+  if (!job.company_id) {
+    throw new Error("niche_news_cluster benötigt company_id.");
+  }
   // deno-lint-ignore no-explicit-any
   const items = (job.payload.items ?? []) as NewsItem[];
-  if (items.length === 0) return { message: "Keine Items, kein Digest erzeugt." };
+  if (items.length === 0) {
+    return { message: "Keine Items, kein Digest erzeugt." };
+  }
 
   const { data: company, error: companyErr } = await client
     .from("companies").select("*").eq("id", job.company_id).single();
-  if (companyErr || !company) throw new Error(`Company ${job.company_id} nicht gefunden.`);
+  if (companyErr || !company) {
+    throw new Error(`Company ${job.company_id} nicht gefunden.`);
+  }
 
   // 1. Clustering via Haiku (deterministisch, günstig).
-  const clusters = await clusterItems(items, company);
+  const rawClusters = await clusterItems(items, company);
+  const voteSignals = await loadVoteSignals(client);
+  const clusters = prepareClusters(rawClusters, voteSignals).slice(0, 14);
+  if (clusters.length === 0) {
+    return { message: "Keine validen Cluster, kein Digest erzeugt." };
+  }
 
   // 2. Trend-Memory: letzte 4 Wochen knowledge_entries für Cross-Temporal Context.
   const trendMemory = await loadTrendMemory(client, company.id);
 
-  // 3. Pro Cluster: Bodies fetchen + Opus Deep-Synthesis (parallel).
+  // 3. Pro Cluster: Bodies fetchen + Deep-Synthesis (parallel).
+  // WICHTIG: Pro-Cluster try/catch. Ein einzelner fehlgeschlagener Cluster (z.B. JSON-Parse-Fehler
+  // der Synthese) darf NICHT den ganzen Digest killen. Fallback: Cluster bleibt erhalten,
+  // was_passiert wird aus den Titeln zusammengesetzt, key_quotes leer.
   const analyses = await Promise.all(
     clusters.map(async (cluster) => {
       const confidence = computeConfidence(cluster.items);
       const trendStreak = countTrendStreak(cluster.cluster_name, trendMemory);
-      const bodies = await fetchTopBodies(cluster.items, client);
-      const analysis = await deepSynthesize(cluster, company, bodies, trendStreak, trendMemory);
-      return { ...analysis, cluster_name: cluster.cluster_name, confidence, trend_streak: trendStreak } as ClusterAnalysis;
+      const signalMetrics = computeSignalMetrics(
+        cluster,
+        company,
+        trendStreak,
+        voteSignals,
+      );
+      try {
+        const bodies = await fetchTopBodies(cluster.items, client);
+        const analysis = await deepSynthesize(
+          cluster,
+          company,
+          bodies,
+          trendStreak,
+          trendMemory,
+          signalMetrics,
+        );
+        return {
+          ...analysis,
+          cluster_name: cluster.cluster_name,
+          confidence: confidence.confidence,
+          confidence_reason: confidence.reason,
+          signal_metrics: signalMetrics,
+          trend_streak: trendStreak,
+        } as ClusterAnalysis;
+      } catch (err) {
+        console.error(
+          `deepSynthesize failed for cluster "${cluster.cluster_name}":`,
+          err,
+        );
+        return {
+          cluster_name: cluster.cluster_name,
+          was_passiert: cluster.items.slice(0, 6).map((i) => i.title).join(
+            " · ",
+          ),
+          warum_relevant: signalMetrics.signal_reason,
+          einordnung: fallbackEinordnung(signalMetrics),
+          next_move: fallbackNextMove(signalMetrics),
+          offene_fragen: [],
+          key_quotes: [],
+          confidence: confidence.confidence,
+          confidence_reason: confidence.reason,
+          signal_metrics: signalMetrics,
+          trend_streak: trendStreak,
+        } as ClusterAnalysis;
+      }
     }),
   );
 
@@ -67,14 +141,23 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
   const title = `Niche-News-Digest, ${new Date().toLocaleDateString("de-DE")}`;
   const { data: digest, error: digestErr } = await client
     .from("digests")
-    .insert({ company_id: company.id, type: "niche_news", title, cluster_analyses: analyses })
+    .insert({
+      company_id: company.id,
+      type: "niche_news",
+      title,
+      cluster_analyses: analyses,
+    })
     .select()
     .single();
-  if (digestErr || !digest) throw new Error(`Digest insert failed: ${digestErr?.message}`);
+  if (digestErr || !digest) {
+    throw new Error(`Digest insert failed: ${digestErr?.message}`);
+  }
 
   // 5. digest_items pro Item.
   const digestItems = clusters.flatMap((cluster) => {
-    const analysis = analyses.find((a) => a.cluster_name === cluster.cluster_name);
+    const analysis = analyses.find((a) =>
+      a.cluster_name === cluster.cluster_name
+    );
     return cluster.items.map((item) => ({
       digest_id: digest.id,
       cluster: cluster.cluster_name,
@@ -89,8 +172,12 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
     }));
   });
   if (digestItems.length > 0) {
-    const { error: itemsErr } = await client.from("digest_items").insert(digestItems);
-    if (itemsErr) throw new Error(`digest_items insert failed: ${itemsErr.message}`);
+    const { error: itemsErr } = await client.from("digest_items").insert(
+      digestItems,
+    );
+    if (itemsErr) {
+      throw new Error(`digest_items insert failed: ${itemsErr.message}`);
+    }
   }
 
   // 6. knowledge_entries für Cross-Temporal Future-Lookup.
@@ -102,10 +189,13 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
       digest_id: digest.id,
       cluster_name: a.cluster_name,
       confidence: a.confidence,
+      signal_metrics: a.signal_metrics,
     },
   }));
   if (knowledgeEntries.length > 0) {
-    const { error: knErr } = await client.from("knowledge_entries").insert(knowledgeEntries);
+    const { error: knErr } = await client.from("knowledge_entries").insert(
+      knowledgeEntries,
+    );
     if (knErr) console.error("knowledge_entries insert failed:", knErr.message);
   }
 
@@ -121,24 +211,25 @@ export async function handle(job: Job, client: SupabaseClient): Promise<Record<s
   };
 }
 
-function computeConfidence(items: NewsItem[]): Confidence {
-  const t1 = items.filter((i) => i.source_tier === 1).length;
-  const t2 = items.filter((i) => i.source_tier === 2).length;
-  if (t1 >= 1) return "verified";
-  if (t2 >= 2) return "editorial";
-  return "community";
-}
-
-async function clusterItems(items: NewsItem[], company: Company): Promise<DigestCluster[]> {
+async function clusterItems(
+  items: NewsItem[],
+  company: Company,
+): Promise<DigestCluster[]> {
   const itemsList = items
-    .map((item, idx) => `[${idx}] T${item.source_tier ?? 3} | ${item.title} (${item.source_name})`)
+    .map((item, idx) =>
+      `[${idx}] T${item.source_tier ?? 3} | ${item.title} (${item.source_name})`
+    )
     .join("\n");
-  const result = await callClaudeJSON<{ clusters: { cluster_name: string; item_indices: number[] }[] }>({
+  const result = await callClaudeJSON<
+    { clusters: { cluster_name: string; item_indices: number[] }[] }
+  >({
     model: DEFAULT_MODEL,
     system: CLUSTERING_PROMPT,
     messages: [{
       role: "user",
-      content: `Industrie: ${company.industry}\nNische: ${company.niche ?? ""}\nKeywords: ${company.keywords.join(", ")}\n\nItems:\n${itemsList}`,
+      content: `Industrie: ${company.industry}\nNische: ${
+        company.niche ?? ""
+      }\nKeywords: ${company.keywords.join(", ")}\n\nItems:\n${itemsList}`,
     }],
     max_tokens: 4000,
   });
@@ -149,7 +240,10 @@ async function clusterItems(items: NewsItem[], company: Company): Promise<Digest
 }
 
 // Trend-Memory: alle Cluster-Namen aus knowledge_entries der letzten 4 Wochen.
-async function loadTrendMemory(client: SupabaseClient, companyId: string): Promise<{ cluster_name: string; weeks_ago: number }[]> {
+async function loadTrendMemory(
+  client: SupabaseClient,
+  companyId: string,
+): Promise<TrendMemoryEntry[]> {
   const since = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
   const { data } = await client
     .from("knowledge_entries")
@@ -166,31 +260,33 @@ async function loadTrendMemory(client: SupabaseClient, companyId: string): Promi
       const name = row.metadata?.cluster_name as string | undefined;
       if (!name) return null;
       const weeksAgo = Math.floor(
-        (Date.now() - new Date(row.created_at).getTime()) / (1000 * 60 * 60 * 24 * 7),
+        (Date.now() - new Date(row.created_at).getTime()) /
+          (1000 * 60 * 60 * 24 * 7),
       );
       return { cluster_name: name, weeks_ago: weeksAgo };
     })
-    .filter((x): x is { cluster_name: string; weeks_ago: number } => x !== null);
+    .filter((x): x is { cluster_name: string; weeks_ago: number } =>
+      x !== null
+    );
 }
 
-// Wie oft tauchte ein ähnlicher Cluster in den letzten 4 Wochen auf? Simple Token-Overlap.
-function countTrendStreak(currentName: string, memory: { cluster_name: string; weeks_ago: number }[]): number {
-  const currentTokens = tokenize(currentName);
-  let streak = 1;
-  for (let week = 1; week <= 4; week++) {
-    const match = memory.find((m) => {
-      if (m.weeks_ago !== week) return false;
-      const overlap = currentTokens.filter((t) => tokenize(m.cluster_name).includes(t)).length;
-      return overlap >= 2;
-    });
-    if (match) streak++;
-    else break;
+async function loadVoteSignals(
+  client: SupabaseClient,
+): Promise<ClusterVoteSignal[]> {
+  const { data } = await client
+    .from("votes")
+    .select("target_id, value")
+    .eq("target_type", "cluster");
+
+  if (!data) return [];
+  const scores = new Map<string, number>();
+  for (const row of data as { target_id: string; value: number }[]) {
+    scores.set(row.target_id, (scores.get(row.target_id) ?? 0) + row.value);
   }
-  return streak;
-}
-
-function tokenize(text: string): string[] {
-  return text.toLowerCase().split(/[\s\-,.&/]+/).filter((t) => t.length > 3);
+  return [...scores.entries()].map(([target_id, score]) => ({
+    target_id,
+    score,
+  }));
 }
 
 // Top-3-Items pro Cluster (T1 vor T2 vor T3, dann Score, dann Datum) — Bodies fetchen.
@@ -200,14 +296,22 @@ async function fetchTopBodies(
 ): Promise<{ item: NewsItem; body: string | null }[]> {
   const sorted = [...items].sort((a, b) => {
     if (a.source_tier !== b.source_tier) return a.source_tier - b.source_tier;
-    if ((b.score ?? 0) !== (a.score ?? 0)) return (b.score ?? 0) - (a.score ?? 0);
-    return new Date(b.published_at ?? 0).getTime() - new Date(a.published_at ?? 0).getTime();
+    if ((b.score ?? 0) !== (a.score ?? 0)) {
+      return (b.score ?? 0) - (a.score ?? 0);
+    }
+    return new Date(b.published_at ?? 0).getTime() -
+      new Date(a.published_at ?? 0).getTime();
   });
   const top = sorted.slice(0, 8);
   return await Promise.all(
     top.map(async (item) => ({
       item,
-      body: await fetchArticleBody(item.url, client, item.source_name, item.title),
+      body: await fetchArticleBody(
+        item.url,
+        client,
+        item.source_name,
+        item.title,
+      ),
     })),
   );
 }
@@ -218,27 +322,45 @@ async function deepSynthesize(
   company: Company,
   bodies: { item: NewsItem; body: string | null }[],
   trendStreak: number,
-  trendMemory: { cluster_name: string; weeks_ago: number }[],
-): Promise<Omit<ClusterAnalysis, "cluster_name" | "confidence" | "trend_streak">> {
-  // Reine Faktensynthese — keine Empfehlungen, keine Meinungen, keine Action-Items.
-  const systemPrompt = `Du bist ein investigativer Journalist der Industry-Briefings auf Faktenbasis verfasst.
+  trendMemory: TrendMemoryEntry[],
+  signalMetrics: ClusterSignalMetrics,
+): Promise<
+  Omit<
+    ClusterAnalysis,
+    | "cluster_name"
+    | "confidence"
+    | "confidence_reason"
+    | "signal_metrics"
+    | "trend_streak"
+  >
+> {
+  const systemPrompt =
+    `Du bist ein investigativer Journalist der Industry-Briefings auf Faktenbasis verfasst.
 
 Stil:
-- Faktisch, präzise, neutral. Keine Empfehlungen, keine Meinungen, keine Action-Items.
+- Faktisch, präzise, neutral. Keine Marketing-Sprache, kein KI-Klang.
 - Zitiere wörtlich aus Originalquellen (mit Source-Name).
 - WICHTIG: Erfinde KEINE Zitate. Wenn kein wörtliches Zitat im Volltext steht, lass das key_quotes-Array leer.
-- Keine Marketing-Sprache, kein KI-Klang.
-- Konzentriere dich darauf was passiert ist, nicht was zu tun wäre.
+- Trenne Fakten, Einordnung und offene Unsicherheiten.
+- next_move ist keine aggressive Empfehlung, sondern eine knappe sinnvolle Einordnung: beobachten, testen, Content-Idee prüfen, oder ignorieren.
 
-Company-Profil (nur als Kontext für inhaltliche Relevanz-Einordnung, NICHT für Empfehlungen):
+Company-Profil:
 - Firma: ${company.name}
+- Produkt: ${company.product_description ?? company.tagline ?? "unbekannt"}
+- ICP: ${company.icp ?? "unbekannt"}
+- Zielmarkt: ${company.target_market ?? "unbekannt"}
 - Industrie: ${company.industry}
 - Nische: ${company.niche ?? "unbekannt"}
 - Keywords: ${company.keywords.join(", ")}
+- Negative Keywords: ${(company.negative_keywords ?? []).join(", ")}
 
 Output-Schema (strikt JSON, keine Prosa drumherum):
 {
   "was_passiert": "5-8 Sätze: was ist die Kernnachricht. Konkret mit Datum, Zahlen, beteiligte Akteure, technische Details. Keine Interpretation.",
+  "warum_relevant": "2-4 Sätze: warum dieses Signal für die Firma/Nische relevant oder irrelevant sein kann. Kontext nutzen, aber nicht übertreiben.",
+  "einordnung": "1-3 Sätze: Fakt vs. Spekulation, Evidenzlage, ob es eher Trend, Einzelereignis oder Rauschen ist.",
+  "next_move": "Ein kurzer, konkreter nächster Umgang mit dem Signal: beobachten, testen, Content daraus prüfen, oder ignorieren.",
+  "offene_fragen": ["Max 3 offene Punkte, die zur sicheren Bewertung fehlen"],
   "key_quotes": [
     { "quote": "Exakt aus dem Volltext kopiert, unter 30 Wörtern", "source": "Source-Name", "url": "Source-URL" }
   ]
@@ -246,22 +368,39 @@ Output-Schema (strikt JSON, keine Prosa drumherum):
 
   // User-Prompt: Cluster-Details, alle Items mit Tier, plus Article-Bodies der Top-3.
   const allItemsList = cluster.items
-    .map((i) => `- T${i.source_tier ?? 3} | ${i.title} | ${i.source_name} | ${i.url}`)
+    .map((i) =>
+      `- T${i.source_tier ?? 3} | ${i.title} | ${i.source_name} | ${i.url}`
+    )
     .join("\n");
 
   const bodyExcerpts = bodies
     .filter((b) => b.body)
-    .map((b) => `### ${b.item.source_name}: ${b.item.title}\nURL: ${b.item.url}\n\n${b.body!.slice(0, 6000)}`)
+    .map((b) =>
+      `### ${b.item.source_name}: ${b.item.title}\nURL: ${b.item.url}\n\n${
+        b.body!.slice(0, 6000)
+      }`
+    )
     .join("\n\n---\n\n");
 
   const trendNote = trendStreak >= 2
     ? `\n\nTrend-Memory: Dieses Thema (oder Verwandtes) erscheint die ${trendStreak}. Woche in Folge. Erwähne das im "warum_relevant" wenn passend.`
     : trendMemory.length > 0
-    ? `\n\nLetzte Wochen-Themen (zur Differenzierung): ${trendMemory.slice(0, 5).map((m) => m.cluster_name).join("; ")}`
+    ? `\n\nLetzte Wochen-Themen (zur Differenzierung): ${
+      trendMemory.slice(0, 5).map((m) => m.cluster_name).join("; ")
+    }`
     : "";
 
   const userPrompt = `Cluster: ${cluster.cluster_name}
 Anzahl Items: ${cluster.items.length}
+Signal-Metriken:
+- Priorität: ${signalMetrics.priority_score}/100
+- Relevanz: ${signalMetrics.relevance_score}/100
+- Evidenz: ${signalMetrics.evidence_score}/100
+- Momentum: ${signalMetrics.momentum_score}/100
+- Neuheit: ${signalMetrics.novelty_score}/100
+- Quellenmix: ${signalMetrics.primary_source_count} T1, ${signalMetrics.editorial_source_count} T2, ${signalMetrics.community_source_count} T3
+- Heuristische Einordnung: ${signalMetrics.action_hint}
+- Grund: ${signalMetrics.signal_reason}
 ${trendNote}
 
 Alle Items:
@@ -270,12 +409,40 @@ ${allItemsList}
 Volltext der Top-Quellen:
 ${bodyExcerpts || "(keine Volltexte verfügbar — synthetisiere aus Titeln)"}`;
 
-  return await callClaudeJSON<Omit<ClusterAnalysis, "cluster_name" | "confidence" | "trend_streak">>({
+  return await callClaudeJSON<
+    Omit<ClusterAnalysis, "cluster_name" | "confidence" | "trend_streak">
+  >({
     model: DEFAULT_MODEL,
     system: systemPrompt,
     cacheSystem: true,
     messages: [{ role: "user", content: userPrompt }],
-    max_tokens: 4000,
+    max_tokens: 8000,
     temperature: 0,
   });
+}
+
+function fallbackEinordnung(metrics: ClusterSignalMetrics): string {
+  if (metrics.evidence_score >= 70) {
+    return "Mehrere stärkere Quellen stützen dieses Signal.";
+  }
+  if (
+    metrics.community_source_count >
+      metrics.primary_source_count + metrics.editorial_source_count
+  ) {
+    return "Aktuell vor allem Community-Signal; als Hypothese behandeln.";
+  }
+  return "Signal ist verwertbar, aber die Quellenlage ist noch begrenzt.";
+}
+
+function fallbackNextMove(metrics: ClusterSignalMetrics): string {
+  switch (metrics.action_hint) {
+    case "act":
+      return "Kurz intern prüfen und entscheiden, ob ein kleiner Test sinnvoll ist.";
+    case "content":
+      return "Als mögliche Content- oder Messaging-Idee vormerken.";
+    case "watch":
+      return "Weiter beobachten und beim nächsten Digest auf Wiederholung prüfen.";
+    case "ignore":
+      return "Vorerst ignorieren, außer es taucht erneut mit stärkerer Evidenz auf.";
+  }
 }
