@@ -84,7 +84,6 @@ export function TopPostDigest({ clusterAnalyses }: TopPostDigestProps) {
               onClick={() => setOpen((prev) => ({ ...prev, [cluster.pattern_name]: true }))}
               className={`text-xs px-2.5 py-1 rounded-full border font-medium transition-colors hover:opacity-80 ${fmtColor}`}
             >
-              <span className="text-[10px] text-[var(--color-muted)] mr-1">{i + 1}.</span>
               {cluster.pattern_name}
             </button>
           );
