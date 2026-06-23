@@ -74,7 +74,7 @@ export function TopPostDigest({ clusterAnalyses }: TopPostDigestProps) {
     <div className="space-y-4">
       {/* Übersicht aller Muster */}
       <div className="flex flex-wrap gap-1.5">
-        {clusterAnalyses.map((cluster, i) => {
+        {clusterAnalyses.map((cluster) => {
           const fmt = cluster.format_typ?.toLowerCase() ?? "";
           const fmtColor = FORMAT_COLORS[fmt] ?? "bg-[var(--color-surface)] text-[var(--color-muted)] border-[var(--color-border)]";
           return (
