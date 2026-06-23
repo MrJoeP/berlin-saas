@@ -116,7 +116,7 @@ export function TopPostDigest({ clusterAnalyses }: TopPostDigestProps) {
                 <span className="text-sm font-semibold block truncate">{cluster.pattern_name}</span>
                 {!isOpen && cluster.beispiele?.length > 0 && (
                   <span className="text-[11px] text-[var(--color-muted)] block truncate">
-                    {cluster.beispiele.slice(0, 2).map(b => b.title).join(" · ")}
+                    {cluster.beispiele.slice(0, 2).map(b => b.title.length > 35 ? b.title.slice(0, 35) + "…" : b.title).join(" · ")}
                   </span>
                 )}
               </span>
