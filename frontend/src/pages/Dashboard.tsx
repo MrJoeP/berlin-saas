@@ -1,15 +1,17 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { ArrowRight, RefreshCw, ChevronDown, ChevronRight, ArrowBigUp, ArrowBigDown, Plus, LogOut } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { ArrowRight, RefreshCw, ChevronDown, ChevronRight, Plus, LogOut, Rss, ExternalLink } from "lucide-react";
+import { NicheNewsDigest } from "@/features/niche-news/NicheNewsDigest";
+import { TopPostDigest, type HookCluster } from "@/features/top-posts/TopPostDigest";
 import {
   supabase,
   type Company,
   type Digest,
   type DigestItem,
-  type ClusterAnalysis,
+  type Source,
   type Vote,
 } from "@/lib/supabase";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@/lib/auth-context";
 import { Button } from "@/components/ui/Button";
 import {
   Card,
@@ -18,13 +20,18 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/Card";
-import { formatDate, formatRelative } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 
 interface DigestWithItems extends Digest {
   items: DigestItem[];
 }
 
-type DigestFilter = Digest["type"] | "all";
+interface CompanySourceRow {
+  company_id: string;
+  source_id: string;
+  active: boolean;
+  sources: Source | null;
+}
 
 const TYPE_LABELS: Record<Digest["type"], string> = {
   niche_news: "Niche News",
@@ -40,23 +47,160 @@ const TYPE_COLORS: Record<Digest["type"], string> = {
   ugc: "bg-orange-500 text-white",
 };
 
-const TIER_LABELS: Record<1 | 2 | 3, string> = {
-  1: "T1 · Primärquelle",
-  2: "T2 · Editorial",
-  3: "T3 · Community",
-};
-
 const TIER_COLORS: Record<1 | 2 | 3, string> = {
   1: "bg-emerald-100 text-emerald-800 border-emerald-300",
   2: "bg-blue-100 text-blue-800 border-blue-300",
   3: "bg-amber-100 text-amber-800 border-amber-300",
 };
 
-const CONFIDENCE_LABELS: Record<"verified" | "editorial" | "community", string> = {
-  verified: "Verifiziert",
-  editorial: "Berichterstattung",
-  community: "Diskussion",
-};
+function ToolBlock({
+  title, week, color, live = true, children,
+}: {
+  title: string; week: string; color: string; live?: boolean; children: React.ReactNode;
+}) {
+  return (
+    <div className="mb-10">
+      <div className="flex items-center gap-3 mb-4">
+        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full text-white ${color}`}>{week}</span>
+        <h2 className={`text-sm font-semibold ${live ? "" : "text-[var(--color-muted)]"}`}>{title}</h2>
+        {!live && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--color-surface)] text-[var(--color-muted)] border border-[var(--color-border)]">
+            Kommt bald
+          </span>
+        )}
+        <div className="flex-1 h-px bg-[var(--color-border)]" />
+      </div>
+      {children}
+    </div>
+  );
+}
+
+const TOP_POST_SOURCES: { name: string; type: string; tier: 1 | 2 | 3; note: string }[] = [
+  { name: "Hacker News", type: "Algolia API", tier: 2, note: "score ≥ 50, nach Keywords gefiltert" },
+  { name: "Product Hunt", type: "RSS", tier: 2, note: "neueste Launches, nach Keywords gefiltert" },
+  { name: "LinkedIn (via Google)", type: "News RSS", tier: 2, note: "site:linkedin.com/posts + company + keywords" },
+  { name: "Dev.to", type: "Tag-Feed", tier: 3, note: "erster Keyword-Tag als Slug" },
+];
+
+function TopPostSourcePanel({ items }: { items: DigestItem[] }) {
+  const [open, setOpen] = useState(false);
+  const countBySource = items.reduce<Record<string, number>>((acc, i) => {
+    const k = i.source_name ?? "Andere";
+    acc[k] = (acc[k] ?? 0) + 1;
+    return acc;
+  }, {});
+  return (
+    <Card className="mb-4">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle>Quellen</CardTitle>
+            <CardDescription>
+              {items.length > 0
+                ? `${items.length} Posts aus letztem Scrape · HN · Product Hunt · LinkedIn · Dev.to`
+                : "HN · Product Hunt · LinkedIn (via Google) · Dev.to"}
+            </CardDescription>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)}>
+            {open ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
+            Quellen
+          </Button>
+        </div>
+      </CardHeader>
+      {open && (
+        <CardContent>
+          <div className="grid gap-2">
+            {TOP_POST_SOURCES.map((src) => (
+              <div key={src.name} className="flex items-center gap-3 rounded-md border border-[var(--color-border)] px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{src.name}</span>
+                    <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[src.tier]}`}>
+                      T{src.tier}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-[var(--color-muted)] uppercase">{src.type}</span>
+                  </div>
+                  <p className="text-xs text-[var(--color-muted)] mt-0.5">{src.note}</p>
+                </div>
+                {items.length > 0 && (
+                  <span className="shrink-0 text-xs tabular-nums text-[var(--color-muted)]">
+                    {countBySource[src.name] ?? 0} Posts
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-[var(--color-muted)] mt-3">
+            Festgelegte Quellen — kein Toggle. Keywords im Profil steuern den Filter.
+          </p>
+        </CardContent>
+      )}
+    </Card>
+  );
+}
+
+function ComingSoonBlock({
+  title, week, color, description, sources, output,
+}: {
+  title: string; week: string; color: string; description: string;
+  sources: string[]; output: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <ToolBlock title={title} week={week} color={color} live={false}>
+      <Card className="opacity-60">
+        <CardHeader>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <CardTitle>{title}</CardTitle>
+              <CardDescription>{description}</CardDescription>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)}>
+              {open ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
+              Details
+            </Button>
+          </div>
+        </CardHeader>
+        {open && (
+          <CardContent className="space-y-4">
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1.5">Quellen</div>
+              <ul className="space-y-1">
+                {sources.map((s) => (
+                  <li key={s} className="text-sm text-[var(--color-muted)] flex items-start gap-2">
+                    <span className="mt-2 w-1 h-1 rounded-full bg-[var(--color-muted)] shrink-0" />
+                    {s}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1.5">Output</div>
+              <p className="text-sm text-[var(--color-muted)]">{output}</p>
+            </div>
+          </CardContent>
+        )}
+      </Card>
+    </ToolBlock>
+  );
+}
+
+function OlderDigests({
+  digests: older, renderDigest,
+}: {
+  digests: DigestWithItems[];
+  renderDigest: (d: DigestWithItems) => React.ReactNode;
+}) {
+  if (older.length === 0) return null;
+  return (
+    <details className="mt-2">
+      <summary className="cursor-pointer text-xs text-[var(--color-muted)] hover:text-[var(--color-fg)] select-none px-1 py-1">
+        {older.length} {older.length === 1 ? "älterer Digest" : "ältere Digests"}
+      </summary>
+      <div className="mt-2 space-y-2">{older.map(renderDigest)}</div>
+    </details>
+  );
+}
 
 function KeywordsEditor({
   keywords,
@@ -155,400 +299,181 @@ function KeywordsEditor({
   );
 }
 
-// Plattform-Mapping aus source_name. Für Community-News-Gruppierung.
-function detectPlatform(sourceName: string | null): string {
-  if (!sourceName) return "Andere";
-  const s = sourceName.toLowerCase();
-  if (s.startsWith("r/")) return "Reddit";
-  if (s.includes("hacker news") || s.startsWith("hn ")) return "Hacker News";
-  if (s.includes("product hunt") || s === "producthunt") return "Product Hunt";
-  if (s.startsWith("x ·") || s.startsWith("x.com") || s.includes("twitter")) return "Twitter/X";
-  if (s.startsWith("youtube ·") || s.includes("youtube")) return "YouTube";
-  if (s.startsWith("linkedin ·") || s.includes("linkedin")) return "LinkedIn";
-  return sourceName;
-}
-
-function ItemRow({
-  item,
-  onVote,
-  myVote,
+function SourceManager({
+  sources,
+  onToggle,
+  onAddRss,
 }: {
-  item: DigestItem;
-  onVote: (id: string, dir: "up" | "down") => void;
-  myVote: -1 | 1 | undefined;
+  sources: CompanySourceRow[];
+  onToggle: (sourceId: string, active: boolean) => Promise<void>;
+  onAddRss: (name: string, url: string) => Promise<void>;
 }) {
-  const tier = (item.source_tier ?? 3) as 1 | 2 | 3;
-  return (
-    <li className="flex items-start gap-2 group">
-      <div className="shrink-0 mt-0.5 flex flex-col items-center justify-center w-7">
-        <button
-          type="button"
-          onClick={() => onVote(item.id, "up")}
-          className={`p-0.5 rounded transition-colors ${
-            myVote === 1
-              ? "bg-emerald-100 text-emerald-700"
-              : "text-[var(--color-muted)] hover:bg-emerald-50 hover:text-emerald-600"
-          }`}
-          title={myVote === 1 ? "Upvote entfernen" : "Upvote"}
-        >
-          <ArrowBigUp className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          onClick={() => onVote(item.id, "down")}
-          className={`p-0.5 rounded transition-colors mt-0.5 ${
-            myVote === -1
-              ? "bg-red-100 text-red-700"
-              : "text-[var(--color-muted)] hover:bg-red-50 hover:text-red-600"
-          }`}
-          title={myVote === -1 ? "Downvote entfernen" : "Downvote"}
-        >
-          <ArrowBigDown className="w-4 h-4" />
-        </button>
-      </div>
-      <span
-        className={`shrink-0 mt-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[tier]}`}
-        title={TIER_LABELS[tier]}
-      >
-        T{tier}
-      </span>
-      <div className="flex-1 min-w-0 mt-0.5">
-        <a
-          href={item.source_url ?? "#"}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm text-[var(--color-accent)] hover:underline"
-        >
-          {item.title}
-        </a>
-        <div className="text-xs text-[var(--color-muted)] mt-0.5">
-          {item.source_name}
-          {item.published_at && (
-            <span className="ml-2">· {formatRelative(item.published_at)}</span>
-          )}
-        </div>
-      </div>
-    </li>
-  );
-}
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [rssUrl, setRssUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-function ItemList({
-  items,
-  onVote,
-  votes,
-}: {
-  items: DigestItem[];
-  onVote: (id: string, dir: "up" | "down") => void;
-  votes: Record<string, -1 | 1>;
-}) {
-  return (
-    <ul className="space-y-1.5">
-      {items.map((item) => (
-        <ItemRow
-          key={item.id}
-          item={item}
-          onVote={onVote}
-          myVote={votes[`item:${item.id}`]}
-        />
-      ))}
-    </ul>
-  );
-}
-
-function DeepAnalysisView({
-  analysis,
-  items,
-  onVote,
-  votes,
-}: {
-  analysis: ClusterAnalysis;
-  items: DigestItem[];
-  onVote: (id: string, dir: "up" | "down") => void;
-  votes: Record<string, -1 | 1>;
-}) {
-  return (
-    <div className="pt-3 space-y-4">
-      <div>
-        <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1">
-          Was passiert ist
-        </div>
-        <p className="text-sm leading-relaxed text-[var(--color-fg)]">
-          {analysis.was_passiert}
-        </p>
-      </div>
-      {analysis.key_quotes?.length > 0 && (
-        <div>
-          <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg)] mb-1.5">
-            Zitate
-          </div>
-          <div className="space-y-2">
-            {analysis.key_quotes.map((q, idx) => (
-              <blockquote key={idx} className="border-l-2 border-[var(--color-accent)] pl-3 py-1">
-                <p className="text-sm italic text-[var(--color-fg)]">"{q.quote}"</p>
-                <p className="text-xs text-[var(--color-muted)] mt-1">
-                  —{" "}
-                  <a
-                    href={q.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[var(--color-accent)] hover:underline"
-                  >
-                    {q.source}
-                  </a>
-                </p>
-              </blockquote>
-            ))}
-          </div>
-        </div>
-      )}
-      <details className="pt-2 border-t border-[var(--color-border)]" open>
-        <summary className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)] cursor-pointer hover:text-[var(--color-fg)]">
-          Alle Quellen ({items.length})
-        </summary>
-        <div className="mt-2">
-          <ItemList items={items} onVote={onVote} votes={votes} />
-        </div>
-      </details>
-    </div>
-  );
-}
-
-// Community-News: T3-Items nach Plattform gruppiert (Reddit, HN, Twitter/X, YouTube, LinkedIn).
-// Keine LLM-Synthese, reine Sammlung mit Upvote-Funktion.
-function CommunitySection({
-  items,
-  digestId,
-  expanded,
-  toggle,
-  onVote,
-  votes,
-}: {
-  items: DigestItem[];
-  digestId: string;
-  expanded: Record<string, boolean>;
-  toggle: (key: string) => void;
-  onVote: (id: string, dir: "up" | "down") => void;
-  votes: Record<string, -1 | 1>;
-}) {
-  const byPlatform: Record<string, DigestItem[]> = {};
-  for (const item of items) {
-    const platform = detectPlatform(item.source_name);
-    if (!byPlatform[platform]) byPlatform[platform] = [];
-    byPlatform[platform].push(item);
-  }
-  // Sort: höchstes Netto-Voting zuerst (Summe meiner Votes für Items dieser Plattform), dann Item-Anzahl.
-  const platformScore = (items: DigestItem[]) =>
-    items.reduce((s, i) => s + (votes[`item:${i.id}`] ?? 0), 0);
-  const entries = Object.entries(byPlatform).sort((a, b) => {
-    const sA = platformScore(a[1]);
-    const sB = platformScore(b[1]);
-    if (sA !== sB) return sB - sA;
-    return b[1].length - a[1].length;
+  const activeCount = sources.filter((row) => row.active).length;
+  const sorted = [...sources].sort((a, b) => {
+    if (a.active !== b.active) return a.active ? -1 : 1;
+    const tierA = a.sources?.tier ?? 3;
+    const tierB = b.sources?.tier ?? 3;
+    if (tierA !== tierB) return tierA - tierB;
+    return (a.sources?.name ?? "").localeCompare(b.sources?.name ?? "");
   });
+
+  async function submitRss() {
+    setSaving(true);
+    setError(null);
+    try {
+      await onAddRss(name, rssUrl);
+      setName("");
+      setRssUrl("");
+      setOpen(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div className="mb-6 last:mb-0 opacity-95">
-      <div className="flex items-baseline gap-2 mb-3 pb-2 border-b border-[var(--color-border)]">
-        <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-fg)]">
-          Community News
-        </h2>
-        <span className="text-[10px] text-[var(--color-muted)]">
-          Reddit, Hacker News, Twitter/X, YouTube, LinkedIn · roh, ungeprüft
-        </span>
-      </div>
-      {entries.length === 0 && (
-        <div className="text-xs text-[var(--color-muted)] italic py-3 px-3 bg-[var(--color-surface)] rounded-md">
-          Keine Community-Items in diesem Digest. Reddit kann von Supabase Edge Functions geblockt werden; YouTube/Twitter/LinkedIn Feeds liefern aktuell nichts. Beim nächsten Scrape wird's automatisch retried.
+    <Card className="mb-6">
+      <CardHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle>Sources</CardTitle>
+            <CardDescription>
+              {activeCount} aktiv von {sources.length} Quellen
+            </CardDescription>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)}>
+            {open ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
+            Quellen
+          </Button>
         </div>
-      )}
-      <div className="space-y-1">
-        {entries.map(([platform, platformItems]) => {
-          const key = `${digestId}|community|${platform}`;
-          const isOpen = !!expanded[key];
-          const score = platformScore(platformItems);
-          return (
-            <div key={platform} className="border border-[var(--color-border)] rounded-md overflow-hidden">
-              <button
-                type="button"
-                onClick={() => toggle(key)}
-                className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--color-bg)] transition-colors text-left"
-              >
-                {isOpen ? (
-                  <ChevronDown className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
-                ) : (
-                  <ChevronRight className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
-                )}
-                <span className="text-sm font-semibold flex-1 truncate">{platform}</span>
-                {score !== 0 && (
-                  <span
-                    className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                      score > 0 ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
-                    }`}
+      </CardHeader>
+      {open && (
+        <CardContent>
+          <div className="grid gap-2 mb-4">
+            {sorted.length === 0 ? (
+              <p className="text-sm text-[var(--color-muted)]">
+                Noch keine Quellen aktiv. Füge einen RSS-Feed hinzu oder starte den Company-Scrape erneut.
+              </p>
+            ) : (
+              sorted.map((row) => {
+                const source = row.sources;
+                const tier = (source?.tier ?? 3) as 1 | 2 | 3;
+                return (
+                  <div
+                    key={row.source_id}
+                    className="flex items-center gap-3 rounded-md border border-[var(--color-border)] px-3 py-2"
                   >
-                    {score > 0 ? `▲ +${score}` : `▼ ${score}`}
-                  </span>
-                )}
-                <span className="shrink-0 text-xs text-[var(--color-muted)] tabular-nums">
-                  {platformItems.length}
-                </span>
-              </button>
-              {isOpen && (
-                <div className="px-3 pb-3 pt-2 border-t border-[var(--color-border)]">
-                  <ItemList
-                    items={[...platformItems].sort((a, b) => {
-                      const sa = votes[`item:${a.id}`] ?? 0;
-                      const sb = votes[`item:${b.id}`] ?? 0;
-                      return sb - sa;
-                    })}
-                    onVote={onVote}
-                    votes={votes}
-                  />
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function Section({
-  title,
-  hint,
-  clusters,
-  digestId,
-  expanded,
-  toggle,
-  analyses,
-  onVote,
-  votes,
-  onVoteCluster,
-  dimmed = false,
-}: {
-  title: string;
-  hint: string;
-  clusters: [string, DigestItem[]][];
-  digestId: string;
-  expanded: Record<string, boolean>;
-  toggle: (key: string) => void;
-  analyses: ClusterAnalysis[];
-  onVote: (id: string, dir: "up" | "down") => void;
-  votes: Record<string, -1 | 1>;
-  onVoteCluster: (digestId: string, clusterName: string, dir: "up" | "down") => void;
-  dimmed?: boolean;
-}) {
-  return (
-    <div className={`mb-6 last:mb-0 ${dimmed ? "opacity-90" : ""}`}>
-      <div className="flex items-baseline gap-2 mb-3 pb-2 border-b border-[var(--color-border)]">
-        <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-fg)]">
-          {title}
-        </h2>
-        <span className="text-[10px] text-[var(--color-muted)]">{hint}</span>
-      </div>
-      <div className="space-y-1">
-        {clusters.map(([clusterName, items]) => {
-          const confidence = items[0]?.cluster_confidence ?? null;
-          const key = `${digestId}|${clusterName}`;
-          const isOpen = !!expanded[key];
-          const analysis = analyses.find((a) => a.cluster_name === clusterName);
-          const myClusterVote = votes[`cluster:${digestId}|${clusterName}`];
-          return (
-            <div key={clusterName} className="border border-[var(--color-border)] rounded-md overflow-hidden">
-              <div className="flex items-stretch">
-                <button
-                  type="button"
-                  onClick={() => toggle(key)}
-                  className="flex-1 flex items-center gap-2 px-3 py-2 hover:bg-[var(--color-bg)] transition-colors text-left min-w-0"
-                >
-                  {isOpen ? (
-                    <ChevronDown className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
-                  ) : (
-                    <ChevronRight className="w-4 h-4 shrink-0 text-[var(--color-muted)]" />
-                  )}
-                  <span className="text-sm font-semibold flex-1 truncate">{clusterName}</span>
-                  {analysis && analysis.trend_streak >= 2 && (
-                    <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-300">
-                      {analysis.trend_streak}. Woche
-                    </span>
-                  )}
-                  {confidence && (
-                    <span
-                      className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded ${CONFIDENCE_COLORS[confidence]}`}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setError(null);
+                        onToggle(row.source_id, !row.active).catch((err) => {
+                          setError(err instanceof Error ? err.message : String(err));
+                        });
+                      }}
+                      className={`h-5 w-9 rounded-full p-0.5 transition-colors ${
+                        row.active ? "bg-[var(--color-accent)]" : "bg-[var(--color-border)]"
+                      }`}
+                      title={row.active ? "Quelle deaktivieren" : "Quelle aktivieren"}
                     >
-                      {CONFIDENCE_LABELS[confidence]}
-                    </span>
-                  )}
-                  <span className="shrink-0 text-xs text-[var(--color-muted)] tabular-nums">
-                    {items.length}
-                  </span>
-                </button>
-                <div className="shrink-0 flex items-center border-l border-[var(--color-border)]">
-                  <button
-                    type="button"
-                    onClick={() => onVoteCluster(digestId, clusterName, "up")}
-                    className={`px-2 py-2 transition-colors ${
-                      myClusterVote === 1
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "text-[var(--color-muted)] hover:bg-emerald-50 hover:text-emerald-600"
-                    }`}
-                    title={myClusterVote === 1 ? "Upvote entfernen" : "Thema upvoten"}
-                  >
-                    <ArrowBigUp className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onVoteCluster(digestId, clusterName, "down")}
-                    className={`px-2 py-2 transition-colors ${
-                      myClusterVote === -1
-                        ? "bg-red-100 text-red-700"
-                        : "text-[var(--color-muted)] hover:bg-red-50 hover:text-red-600"
-                    }`}
-                    title={myClusterVote === -1 ? "Downvote entfernen" : "Thema downvoten"}
-                  >
-                    <ArrowBigDown className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-              {isOpen && (
-                <div className="px-3 pb-3 pt-1 border-t border-[var(--color-border)]">
-                  {analysis ? (
-                    <DeepAnalysisView analysis={analysis} items={items} onVote={onVote} votes={votes} />
-                  ) : (
-                    <>
-                      {items[0]?.summary && (
-                        <p className="text-sm text-[var(--color-fg)] mb-3 mt-2">{items[0].summary}</p>
+                      <span
+                        className={`block h-4 w-4 rounded-full bg-white transition-transform ${
+                          row.active ? "translate-x-4" : "translate-x-0"
+                        }`}
+                      />
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm font-medium truncate">
+                          {source?.name ?? row.source_id}
+                        </span>
+                        <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[tier]}`}>
+                          T{tier}
+                        </span>
+                        {source?.type && (
+                          <span className="shrink-0 text-[10px] text-[var(--color-muted)] uppercase">
+                            {source.type}
+                          </span>
+                        )}
+                      </div>
+                      {source?.url && (
+                        <a
+                          href={source.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-0.5 inline-flex max-w-full items-center gap-1 text-xs text-[var(--color-muted)] hover:text-[var(--color-accent)]"
+                        >
+                          <span className="truncate">{source.url}</span>
+                          <ExternalLink className="w-3 h-3 shrink-0" />
+                        </a>
                       )}
-                      <ItemList items={items} onVote={onVote} votes={votes} />
-                    </>
-                  )}
-                </div>
-              )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Rss className="w-4 h-4 text-[var(--color-muted)]" />
+              <span className="text-xs font-bold uppercase tracking-wider">RSS hinzufügen</span>
             </div>
-          );
-        })}
-      </div>
-    </div>
+            <div className="grid gap-2 sm:grid-cols-[1fr_1.5fr_auto]">
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className="min-w-0 text-sm px-2 py-1.5 rounded border border-[var(--color-border)] bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+                placeholder="Name"
+              />
+              <input
+                value={rssUrl}
+                onChange={(e) => setRssUrl(e.target.value)}
+                className="min-w-0 text-sm px-2 py-1.5 rounded border border-[var(--color-border)] bg-white focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+                placeholder="https://example.com/feed.xml"
+                type="url"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={submitRss}
+                disabled={saving || !name.trim() || !rssUrl.trim()}
+              >
+                <Plus className="w-4 h-4 mr-1" />
+                {saving ? "Speichere..." : "Hinzufügen"}
+              </Button>
+            </div>
+            {error && <p className="text-xs text-[var(--color-danger)] mt-2">{error}</p>}
+          </div>
+        </CardContent>
+      )}
+    </Card>
   );
 }
-
-const CONFIDENCE_COLORS: Record<"verified" | "editorial" | "community", string> = {
-  verified: "bg-emerald-600 text-white",
-  editorial: "bg-blue-600 text-white",
-  community: "bg-amber-500 text-white",
-};
 
 export function Dashboard() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const pitchMode = searchParams.get("pitch") === "1";
   const [company, setCompany] = useState<Company | null>(null);
   const [allCompanies, setAllCompanies] = useState<Company[]>([]);
   const [digests, setDigests] = useState<DigestWithItems[]>([]);
+  const [sourceRows, setSourceRows] = useState<CompanySourceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<DigestFilter>("all");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   // Map<target_type:target_id, vote-value (-1 oder +1)>
   const [votes, setVotes] = useState<Record<string, -1 | 1>>({});
   const { session, signOut } = useAuth();
+  const userId = session?.user.id;
 
   function toggleCluster(key: string) {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -563,7 +488,7 @@ export function Dashboard() {
   //   Aktuell selbe direction → lösche (undo)
   //   Aktuell andere direction → flip auf direction
   async function castVote(targetType: "item" | "cluster", targetId: string, direction: "up" | "down") {
-    if (!session?.user.id) return;
+    if (!userId) return;
     const newValue: -1 | 1 = direction === "up" ? 1 : -1;
     const key = voteKey(targetType, targetId);
     const current = votes[key];
@@ -578,14 +503,14 @@ export function Dashboard() {
       await supabase
         .from("votes")
         .delete()
-        .eq("user_id", session.user.id)
+        .eq("user_id", userId)
         .eq("target_type", targetType)
         .eq("target_id", targetId);
     } else {
       // Set or flip
       setVotes((prev) => ({ ...prev, [key]: newValue }));
       await supabase.from("votes").upsert(
-        { user_id: session.user.id, target_type: targetType, target_id: targetId, value: newValue },
+        { user_id: userId, target_type: targetType, target_id: targetId, value: newValue },
         { onConflict: "user_id,target_type,target_id" },
       );
     }
@@ -596,13 +521,53 @@ export function Dashboard() {
   const voteCluster = (digestId: string, clusterName: string, direction: "up" | "down") =>
     castVote("cluster", `${digestId}|${clusterName}`, direction);
 
-  useEffect(() => {
-    loadData();
+  const loadVotes = useCallback(async () => {
+    if (!userId) return;
+    const { data: voteRows } = await supabase
+      .from("votes")
+      .select("target_type, target_id, value")
+      .eq("user_id", userId);
+    const map: Record<string, -1 | 1> = {};
+    for (const v of (voteRows ?? []) as Vote[]) {
+      map[`${v.target_type}:${v.target_id}`] = v.value;
+    }
+    setVotes(map);
+  }, [userId]);
+
+  const loadSources = useCallback(async (companyId: string) => {
+    const { data } = await supabase
+      .from("company_sources")
+      .select("company_id, source_id, active, sources(*)")
+      .eq("company_id", companyId);
+    setSourceRows((data ?? []) as unknown as CompanySourceRow[]);
   }, []);
 
-  async function loadData() {
-    setLoading(true);
+  const loadDigestsForCompany = useCallback(async (companyId: string) => {
+    const { data: digestData } = await supabase
+      .from("digests")
+      .select("*")
+      .eq("company_id", companyId)
+      .order("generated_at", { ascending: false });
 
+    if (!digestData) {
+      setDigests([]);
+      return;
+    }
+
+    const enriched = await Promise.all(
+      digestData.map(async (d) => {
+        const { data: items } = await supabase
+          .from("digest_items")
+          .select("*")
+          .eq("digest_id", d.id);
+        return { ...d, items: (items ?? []) as DigestItem[] } as DigestWithItems;
+      }),
+    );
+    setDigests(enriched);
+  }, []);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
     const { data: companies } = await supabase
       .from("companies")
       .select("*")
@@ -618,69 +583,66 @@ export function Dashboard() {
 
     setAllCompanies(companies as Company[]);
     // Aktive Company: aktuell ausgewählte beibehalten falls noch in Liste, sonst neueste.
-    const currentCompany = company && companies.some((c) => c.id === company.id)
-      ? (companies.find((c) => c.id === company.id) as Company)
+    const selectedCompanyId = company?.id;
+    const currentCompany = selectedCompanyId && companies.some((c) => c.id === selectedCompanyId)
+      ? (companies.find((c) => c.id === selectedCompanyId) as Company)
       : (companies[0] as Company);
     setCompany(currentCompany);
-
-    const { data: digestData } = await supabase
-      .from("digests")
-      .select("*")
-      .eq("company_id", currentCompany.id)
-      .order("generated_at", { ascending: false });
-
-    if (digestData) {
-      const enriched = await Promise.all(
-        digestData.map(async (d) => {
-          const { data: items } = await supabase
-            .from("digest_items")
-            .select("*")
-            .eq("digest_id", d.id);
-          return { ...d, items: (items ?? []) as DigestItem[] } as DigestWithItems;
-        }),
-      );
-      setDigests(enriched);
-
-      await loadVotes();
-    }
-
+    await Promise.all([
+      loadDigestsForCompany(currentCompany.id),
+      loadSources(currentCompany.id),
+      loadVotes(),
+    ]);
     setLoading(false);
-  }
+  }, [company?.id, loadDigestsForCompany, loadSources, loadVotes, navigate]);
 
-  async function loadVotes() {
-    if (!session?.user.id) return;
-    const { data: voteRows } = await supabase
-      .from("votes")
-      .select("target_type, target_id, value")
-      .eq("user_id", session.user.id);
-    const map: Record<string, -1 | 1> = {};
-    for (const v of (voteRows ?? []) as Vote[]) {
-      map[`${v.target_type}:${v.target_id}`] = v.value;
-    }
-    setVotes(map);
-  }
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      void loadData();
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [loadData]);
 
   async function switchCompany(newCompany: Company) {
     setCompany(newCompany);
     setDigests([]);
+    setSourceRows([]);
     setLoading(true);
-    const { data: digestData } = await supabase
-      .from("digests")
-      .select("*")
-      .eq("company_id", newCompany.id)
-      .order("generated_at", { ascending: false });
-    if (digestData) {
-      const enriched = await Promise.all(
-        digestData.map(async (d) => {
-          const { data: items } = await supabase
-            .from("digest_items").select("*").eq("digest_id", d.id);
-          return { ...d, items: (items ?? []) as DigestItem[] } as DigestWithItems;
-        }),
-      );
-      setDigests(enriched);
-      await loadVotes();
-    }
+    await Promise.all([
+      loadDigestsForCompany(newCompany.id),
+      loadSources(newCompany.id),
+      loadVotes(),
+    ]);
     setLoading(false);
+  }
+
+  async function toggleSource(sourceId: string, active: boolean) {
+    if (!company) return;
+    setSourceRows((prev) =>
+      prev.map((row) => (row.source_id === sourceId ? { ...row, active } : row)),
+    );
+    const { error } = await supabase
+      .from("company_sources")
+      .update({ active })
+      .eq("company_id", company.id)
+      .eq("source_id", sourceId);
+    if (error) {
+      setSourceRows((prev) =>
+        prev.map((row) => (row.source_id === sourceId ? { ...row, active: !active } : row)),
+      );
+      throw error;
+    }
+  }
+
+  async function addRssSource(name: string, rssUrl: string) {
+    if (!company) return;
+    const { error } = await supabase.rpc("add_company_rss_source", {
+      p_company_id: company.id,
+      p_name: name,
+      p_url: rssUrl,
+    });
+    if (error) throw error;
+    await loadSources(company.id);
   }
 
   async function triggerRun() {
@@ -722,23 +684,64 @@ export function Dashboard() {
     return null;
   }
 
-  function groupByCluster(items: DigestItem[]) {
-    const map: Record<string, DigestItem[]> = {};
-    for (const item of items) {
-      const key = item.cluster ?? "Sonstiges";
-      if (!map[key]) map[key] = [];
-      map[key].push(item);
-    }
-    return map;
+  const topPostDigests = digests.filter((d) => d.type === "top_post");
+  const nicheNewsDigests = digests.filter((d) => d.type === "niche_news");
+  const latestTopPost = topPostDigests[0] ?? null;
+  const latestNicheNews = nicheNewsDigests[0] ?? null;
+
+  function renderTopPost(d: DigestWithItems) {
+    return (
+      <Card key={d.id}>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle>{d.title}</CardTitle>
+              <CardDescription>Erzeugt {formatDate(d.generated_at)}</CardDescription>
+            </div>
+            <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${TYPE_COLORS["top_post"]}`}>
+              {TYPE_LABELS["top_post"]}
+            </span>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <TopPostDigest clusterAnalyses={(d.cluster_analyses ?? []) as unknown as HookCluster[]} />
+        </CardContent>
+      </Card>
+    );
   }
 
-  const availableTypes = Array.from(new Set(digests.map((d) => d.type)));
-  const showTabs = availableTypes.length > 1;
-
-  const visibleDigests =
-    activeFilter === "all"
-      ? digests
-      : digests.filter((d) => d.type === activeFilter);
+  function renderNicheNews(d: DigestWithItems) {
+    return (
+      <Card key={d.id}>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle>{d.title}</CardTitle>
+              <CardDescription>
+                Erzeugt {formatDate(d.generated_at)}
+                {d.delivered_at && ` · gesendet ${formatDate(d.delivered_at)}`}
+              </CardDescription>
+            </div>
+            <span className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${TYPE_COLORS["niche_news"]}`}>
+              {TYPE_LABELS["niche_news"]}
+            </span>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <NicheNewsDigest
+            items={d.items}
+            digestId={d.id}
+            analyses={d.cluster_analyses ?? []}
+            expanded={expanded}
+            toggle={toggleCluster}
+            onVote={voteItem}
+            votes={votes}
+            onVoteCluster={voteCluster}
+          />
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <div className="min-h-screen px-4 py-8">
@@ -798,133 +801,81 @@ export function Dashboard() {
 
         <KeywordsEditor keywords={company.keywords} onSave={saveKeywords} />
 
-        {digests.length === 0 ? (
-          <Card>
-            <CardContent className="text-center py-12">
-              <p className="text-sm text-[var(--color-fg)] mb-2">
-                {company.industry
-                  ? "Bot scraped Quellen und baut den ersten Digest. Dauert ein paar Minuten."
-                  : "Bot analysiert deine Website, klassifiziert die Industrie und picked Sources."}
-              </p>
-              <p className="text-xs text-[var(--color-muted)] mb-6">
-                Setup von {formatDate(company.created_at)}. Aktualisiere die Seite in 1 bis 2 Minuten.
-              </p>
-              <Button variant="secondary" onClick={triggerRun} disabled={triggering}>
-                <ArrowRight className="w-4 h-4 mr-1" />
-                {triggering ? "Job läuft..." : "Manuell neu anstoßen"}
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            {/* Filter-Tabs — erst sichtbar sobald mehrere Digest-Typen vorhanden */}
-            {showTabs && (
-              <div className="flex gap-2 mb-6 flex-wrap">
-                <button
-                  onClick={() => setActiveFilter("all")}
-                  className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                    activeFilter === "all"
-                      ? "bg-[var(--color-accent)] text-white"
-                      : "bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-fg)]"
-                  }`}
-                >
-                  Alle <span className="opacity-70">{digests.length}</span>
-                </button>
-                {availableTypes.map((type) => (
-                  <button
-                    key={type}
-                    onClick={() => setActiveFilter(type)}
-                    className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                      activeFilter === type
-                        ? "bg-[var(--color-accent)] text-white"
-                        : "bg-[var(--color-surface)] text-[var(--color-muted)] hover:text-[var(--color-fg)]"
-                    }`}
-                  >
-                    {TYPE_LABELS[type]}{" "}
-                    <span className="opacity-70">
-                      {digests.filter((d) => d.type === type).length}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
+        {/* W2: Top-Post-Digest — pitchMode hides this to preserve the W1 storyline */}
+        {!pitchMode && <ToolBlock title="Top-Post-Digest" week="W2" color="bg-emerald-600">
+          <TopPostSourcePanel items={latestTopPost?.items ?? []} />
+          {latestTopPost ? (
+            <>
+              {renderTopPost(latestTopPost)}
+              <OlderDigests digests={topPostDigests.slice(1)} renderDigest={renderTopPost} />
+            </>
+          ) : (
+            <Card>
+              <CardContent className="py-8 text-center">
+                <p className="text-sm text-[var(--color-muted)]">
+                  Noch kein Top-Post-Digest. Läuft automatisch beim nächsten Cron-Job (täglich 06:30).
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </ToolBlock>}
 
-            {/* Digest-Feed */}
-            <div className="space-y-6">
-              {visibleDigests.map((digest) => (
-                <Card key={digest.id}>
-                  <CardHeader>
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <CardTitle>{digest.title}</CardTitle>
-                        <CardDescription>
-                          Erzeugt {formatDate(digest.generated_at)}
-                          {digest.delivered_at &&
-                            ` · gesendet ${formatDate(digest.delivered_at)}`}
-                        </CardDescription>
-                      </div>
-                      <span
-                        className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded-full ${TYPE_COLORS[digest.type]}`}
-                      >
-                        {TYPE_LABELS[digest.type]}
-                      </span>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    {(() => {
-                      const grouped = groupByCluster(digest.items);
-                      const fachmeinung: [string, DigestItem[]][] = [];
-                      // T3-Items werden separat als Community-News gerendert, nicht in Clustern.
-                      const communityItems: DigestItem[] = [];
-                      for (const entry of Object.entries(grouped)) {
-                        const confidence = entry[1][0]?.cluster_confidence;
-                        if (confidence === "community") {
-                          communityItems.push(...entry[1]);
-                        } else {
-                          fachmeinung.push(entry);
-                        }
-                      }
-                      // Auch reine T3-Items aus anderen Clustern in die Community-Sektion ziehen.
-                      for (const item of digest.items) {
-                        if (item.source_tier === 3 && !communityItems.some((c) => c.id === item.id)) {
-                          // Nur wenn nicht schon Teil eines Community-Clusters.
-                          if (item.cluster_confidence !== "community") communityItems.push(item);
-                        }
-                      }
-                      const analyses = digest.cluster_analyses ?? [];
-                      return (
-                        <>
-                          {fachmeinung.length > 0 && (
-                            <Section
-                              title="Fachmeinung"
-                              hint="Primärquellen und Industry-Pubs · faktische Synthese"
-                              clusters={fachmeinung}
-                              digestId={digest.id}
-                              expanded={expanded}
-                              toggle={toggleCluster}
-                              analyses={analyses}
-                              onVote={voteItem}
-                              votes={votes}
-                              onVoteCluster={voteCluster}
-                            />
-                          )}
-                          <CommunitySection
-                            items={communityItems}
-                            digestId={digest.id}
-                            expanded={expanded}
-                            toggle={toggleCluster}
-                            onVote={voteItem}
-                            votes={votes}
-                          />
-                        </>
-                      );
-                    })()}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </>
-        )}
+        {/* W1: Niche-News-Digest */}
+        <ToolBlock title="Niche-News-Digest" week="W1" color="bg-[var(--color-accent)]">
+          <SourceManager sources={sourceRows} onToggle={toggleSource} onAddRss={addRssSource} />
+          {latestNicheNews ? (
+            <>
+              {renderNicheNews(latestNicheNews)}
+              <OlderDigests digests={nicheNewsDigests.slice(1)} renderDigest={renderNicheNews} />
+            </>
+          ) : (
+            <Card>
+              <CardContent className="text-center py-12">
+                <p className="text-sm text-[var(--color-fg)] mb-2">
+                  {company.industry
+                    ? "Bot scraped Quellen und baut den ersten Digest. Dauert ein paar Minuten."
+                    : "Bot analysiert deine Website, klassifiziert die Industrie und picked Sources."}
+                </p>
+                <p className="text-xs text-[var(--color-muted)] mb-6">
+                  Setup von {formatDate(company.created_at)}. Aktualisiere die Seite in 1 bis 2 Minuten.
+                </p>
+                <Button variant="secondary" onClick={triggerRun} disabled={triggering}>
+                  <ArrowRight className="w-4 h-4 mr-1" />
+                  {triggering ? "Job läuft..." : "Manuell neu anstoßen"}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+        </ToolBlock>
+
+        {/* W3: Wettbewerbs-Monitor */}
+        <ComingSoonBlock
+          title="Wettbewerbs-Monitor"
+          week="W3"
+          color="bg-purple-600"
+          description="Deep-Track auf benannte Konkurrenz, Sales-Page-Diffs und Messaging-Änderungen."
+          sources={[
+            "Website-Scrape via Firecrawl — Diff auf Pricing, Features, Messaging",
+            "Google News RSS — Erwähnungen der Konkurrenten",
+            "Product Hunt — neue Launches im selben Segment",
+          ]}
+          output="Wöchentlicher Diff: Was hat sich geändert, was ist neu, was wurde entfernt. Direkt vergleichbar mit eigenem Messaging."
+        />
+
+        {/* W4: UGC-Hunter */}
+        <ComingSoonBlock
+          title="UGC-Hunter"
+          week="W4"
+          color="bg-orange-500"
+          description="Multi-Source-Mentions und Quote-Extraction aus Community-Posts und Reviews."
+          sources={[
+            "Reddit — Mentions in relevanten Subreddits via RSS",
+            "Twitter / X — Keyword-Suche via nitter oder API",
+            "G2 / Trustpilot — Review-Scrape für benannte Produkte",
+            "Product Hunt — Kommentare und Reviews",
+          ]}
+          output="Quote-Library: Originalzitate nach Kategorie (Problem, Lob, Kritik, Wunsch). Direkt verwendbar in Marketing-Texten und Ads."
+        />
       </div>
     </div>
   );
