@@ -255,7 +255,7 @@ function KeywordsEditor({
             Company Context
           </div>
           <p className="text-sm text-[var(--color-fg)]">
-            {company.product_description || company.tagline || "Noch keine Produktbeschreibung gesetzt."}
+            {company.product_description || "Noch keine Produktbeschreibung gesetzt."}
           </p>
           <p className="text-xs text-[var(--color-muted)] mt-1">
             {company.icp || "ICP fehlt"}{company.target_market ? ` · ${company.target_market}` : ""}
