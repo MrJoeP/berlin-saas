@@ -15,6 +15,8 @@ Der wichtigste Produktausbau:
 - Backend-Synthese nutzt Company Context und erzeugt mehrwertige Felder.
 - Top-Post-Digest wurde zu Published Content umgebaut: die 10 besten veröffentlichten Artikel, Beiträge und Launches werden ausgewählt, inhaltlich zusammengefasst, bewertet und verlinkt.
 - Published Content unterstützt Upvotes/Downvotes und nutzt frühere Votes als Ranking-Signal für neue Top-10-Runs.
+- Niche-News-Digest zeigt keine separate Community-News-Sektion mehr.
+- Published Content endet nach den Top-10-Karten; die unteren Themen-/Accordion-Punkte inklusive "Unbekanntes Thema" wurden entfernt.
 
 ## Wichtige Warnung
 
@@ -259,6 +261,7 @@ Dateien:
   - `published_items`
 - `published_items` enthält pro Artikel eine eigene Summary, Relevanz, strategischen Mehrwert und Takeaways.
 - UI zeigt die 10 besten Inhalte oben als eigene Karten mit Quelle, Score, Datum, Link, Zusammenfassung, Mehrwert und Up-/Downvote-Buttons.
+- Jede Top-10-Karte enthält eine kurze `Kurzfassung`.
 - User-Votes bleiben Single-Vote-Toggles über die bestehende `votes`-Tabelle.
 - RSS-/Reddit-Scraper speichern kurze Exzerpte, damit Zusammenfassungen mehr Kontext als nur Titel haben.
 - Alte gespeicherte Top-Post-Digests bleiben lesbar, aber der neue Output ist erst bei neuen Runs nach Function Deploy sichtbar.
