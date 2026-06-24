@@ -2,7 +2,7 @@
 
 ## Ziel
 
-Bitte die lokalen Änderungen für den Niche-News-Digest sauber nach GitHub pushen und danach Supabase/Hosting deployen.
+Bitte die lokalen Änderungen für den Niche-News-Digest und den Published-Content-Digest sauber nach GitHub pushen und danach Supabase/Hosting deployen.
 
 Der wichtigste Produktausbau:
 
@@ -13,6 +13,8 @@ Der wichtigste Produktausbau:
 - Negative Keywords im Scrape-Filter.
 - Cluster werden nach Handlungskategorien sortiert.
 - Backend-Synthese nutzt Company Context und erzeugt mehrwertige Felder.
+- Top-Post-Digest wurde zu Published Content umgebaut: die 10 besten veröffentlichten Artikel, Beiträge und Launches werden ausgewählt, inhaltlich zusammengefasst, bewertet und verlinkt.
+- Published Content unterstützt Upvotes/Downvotes und nutzt frühere Votes als Ranking-Signal für neue Top-10-Runs.
 
 ## Wichtige Warnung
 
@@ -51,6 +53,7 @@ git checkout codex/niche-news-founder-briefing
 Frontend:
 
 ```bash
+git add frontend/src/features/top-posts/TopPostDigest.tsx
 git add frontend/src/features/niche-news/NicheNewsDigest.tsx
 git add frontend/src/lib/supabase.ts
 git add frontend/src/pages/Dashboard.tsx
@@ -96,12 +99,18 @@ Optional, nur wenn diese Tool-Split-Struktur bewusst übernommen werden soll:
 
 ```bash
 git add supabase/functions/tool-01-niche-news/
-git add supabase/functions/tool-02-top-posts/
 git add tools/
 git add supabase/seeds/002_community_expert.sql
 ```
 
 Bitte vorher prüfen, ob diese optionalen Ordner wirklich deploy-/repo-relevant sind.
+
+Published Content:
+
+```bash
+git add supabase/functions/tool-02-top-posts/top-post-cluster.ts
+git add supabase/functions/tool-02-top-posts/top-post-scrape.ts
+```
 
 ## Was geändert wurde
 
@@ -225,6 +234,35 @@ Dateien:
 
 - Items, die negative Keywords matchen, werden vor Clustering entfernt.
 
+### 8. Published Content statt Hook-Digest
+
+Dateien:
+
+- `frontend/src/features/top-posts/TopPostDigest.tsx`
+- `frontend/src/pages/Dashboard.tsx`
+- `supabase/functions/tool-02-top-posts/top-post-cluster.ts`
+
+Änderungen:
+
+- Top-Post-Digest analysiert nicht mehr, "warum etwas funktioniert" oder welche Hooks viral sind.
+- Backend rankt veröffentlichte Artikel, Beiträge, Diskussionen und Launches nach Score, Quellenqualität und Aktualität.
+- Backend lädt frühere Votes aus `votes` für `top_post`-Digest-Items und mappt sie über `source_url` und `source_name` zurück auf neue Kandidaten.
+- Exakte URL-Votes wirken stark, Quellen-Votes wirken schwächer als Source-Prior.
+- Backend speichert ein Top-10-Briefing:
+  - `topic_name`
+  - `content_type: top_articles`
+  - `source_mix`
+  - `summary`
+  - `why_relevant`
+  - `strategic_value`
+  - `key_takeaways`
+  - `published_items`
+- `published_items` enthält pro Artikel eine eigene Summary, Relevanz, strategischen Mehrwert und Takeaways.
+- UI zeigt die 10 besten Inhalte oben als eigene Karten mit Quelle, Score, Datum, Link, Zusammenfassung, Mehrwert und Up-/Downvote-Buttons.
+- User-Votes bleiben Single-Vote-Toggles über die bestehende `votes`-Tabelle.
+- RSS-/Reddit-Scraper speichern kurze Exzerpte, damit Zusammenfassungen mehr Kontext als nur Titel haben.
+- Alte gespeicherte Top-Post-Digests bleiben lesbar, aber der neue Output ist erst bei neuen Runs nach Function Deploy sichtbar.
+
 ## Verifikation lokal
 
 Folgende Checks wurden erfolgreich ausgeführt:
@@ -237,6 +275,7 @@ npm run build
 
 ```bash
 deno check supabase/functions/scrape-news/handler.ts supabase/functions/generate-digest/handler.ts
+deno check supabase/functions/tool-02-top-posts/top-post-cluster.ts supabase/functions/tool-02-top-posts/top-post-scrape.ts
 ```
 
 ```bash
