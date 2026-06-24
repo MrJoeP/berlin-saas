@@ -8,10 +8,6 @@ interface PublishedContentItem {
   score: number | null;
   source: string;
   published_at: string | null;
-  summary: string;
-  why_relevant: string;
-  strategic_value: string;
-  key_takeaways: string[];
 }
 
 interface PublishedContentCluster {
@@ -24,15 +20,17 @@ interface PublishedContentCluster {
   published_items: PublishedContentItem[];
 }
 
-interface TopPostVoteSignals {
-  byUrl: Map<string, number>;
-  bySource: Map<string, number>;
-}
+const CLUSTER_PROMPT = `Du bist ein thematischer Analyst. Gruppiere die folgenden Artikel/Posts nach übergeordneten Themen.
+Verwende 3-6 Themen, je nach Datenlage. Jeder Item-Index darf nur in einem Cluster vorkommen.
+Ignoriere Duplikate oder sehr ähnliche Beiträge.
+
+Antworte ausschließlich JSON:
+{"clusters": [{"topic": "Thema-Name", "item_indices": [0, 3, 7]}]}`;
 
 const SYNTH_PROMPT = `Du bist ein präziser Industry-Briefing-Redakteur.
-Du fasst einen veröffentlichten Artikel, Beitrag oder Launch-Post inhaltlich zusammen.
-Analysiere NICHT, warum etwas viral ging. Gib KEINE Hook- oder Copywriting-Beratung.
-Erfinde keine Details, die nicht aus Titel, Quelle, URL oder Exzerpt ableitbar sind.
+Fasse die folgenden veröffentlichten Artikel/Posts zu einem Themen-Cluster zusammen.
+Analysiere NICHT, warum etwas viral ging. Gib KEINE Hook-Beratung.
+Beschreibe, was tatsächlich veröffentlicht wurde und warum es für die Firma relevant ist.
 
 Firma: {company}
 Industrie: {industry}
@@ -42,10 +40,9 @@ ICP: {icp}
 
 Antworte JSON:
 {
-  "summary": "3-5 Sätze: worum es in diesem konkreten veröffentlichten Inhalt geht",
-  "why_relevant": "1-3 Sätze: warum dieser Inhalt für Firma, Industrie oder ICP relevant sein kann",
-  "strategic_value": "1 konkreter Mehrwert: welche Produkt-, Content-, Sales- oder Marktbeobachtung daraus abgeleitet werden kann",
-  "key_takeaways": ["3-5 kurze Takeaways aus dem Inhalt"]
+  "summary": "3-5 Sätze: Was wurde in diesem Themenbereich veröffentlicht?",
+  "why_relevant": "1-3 Sätze: Warum ist das für diese Firma oder ihren ICP relevant?",
+  "key_takeaways": ["3-5 konkrete Erkenntnisse aus den Inhalten"]
 }`;
 
 export async function handle(
@@ -56,38 +53,54 @@ export async function handle(
   const items = (job.payload.items ?? []) as NewsItem[];
   if (items.length === 0) return { message: "keine items" };
 
-  const { data: co } = await c.from("companies").select("*").eq(
-    "id",
-    job.company_id,
-  ).single();
+  const { data: co } = await c.from("companies").select("*").eq("id", job.company_id).single();
   if (!co) throw new Error(`Company ${job.company_id} not found`);
 
-  const voteSignals = await loadVoteSignals(c, job.company_id);
-  const topItems = selectTopItems(items, 10, voteSignals);
-  const summarizedItems = await Promise.all(
-    topItems.map((item) => summarizeItem(item, co as Company)),
-  );
+  // Top 30 by combined rank (score + tier + recency)
+  const topItems = [...items]
+    .sort((a, b) => itemRank(b) - itemRank(a))
+    .slice(0, 30);
 
-  const sourceMix = [...new Set(topItems.map((item) => item.source_name))];
-  const contentClusters: PublishedContentCluster[] = [
-    {
-      topic_name: "Top 10 veröffentlichte Artikel & Beiträge",
-      content_type: "top_articles",
-      source_mix: sourceMix,
-      summary: summarizedItems
-        .map((item, idx) => `${idx + 1}. ${item.title}: ${item.summary}`)
-        .join("\n"),
-      why_relevant:
-        "Diese zehn Inhalte sind die stärksten aktuell gefundenen Veröffentlichungen nach Score, Quellenqualität und Aktualität.",
-      key_takeaways: summarizedItems.flatMap((item) => item.key_takeaways)
-        .slice(0, 10),
-      published_items: summarizedItems,
-    },
-  ];
+  // Step 1: Cluster by topic
+  const clusters = await clusterByTopic(topItems);
 
-  const title = `Top-10-Artikel-Briefing, ${
-    new Date().toLocaleDateString("de-DE")
-  }`;
+  // Step 2: Synthesize each cluster in parallel
+  const contentClusters: PublishedContentCluster[] = (
+    await Promise.all(
+      clusters.map(async (cluster) => {
+        const clusterItems = cluster.item_indices
+          .filter(i => i < topItems.length)
+          .map(i => topItems[i]);
+
+        if (clusterItems.length === 0) return null;
+
+        const sourceMix = [...new Set(clusterItems.map(i => i.source_name))];
+        const synth = await synthCluster(clusterItems, co as Company);
+
+        const publishedItems: PublishedContentItem[] = clusterItems
+          .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+          .map(item => ({
+            title: item.title,
+            url: item.url,
+            score: item.score,
+            source: item.source_name,
+            published_at: item.published_at,
+          }));
+
+        return {
+          topic_name: cluster.topic,
+          content_type: "top_articles" as const,
+          source_mix: sourceMix,
+          summary: synth.summary,
+          why_relevant: synth.why_relevant,
+          key_takeaways: synth.key_takeaways,
+          published_items: publishedItems,
+        };
+      }),
+    )
+  ).filter(Boolean) as PublishedContentCluster[];
+
+  const title = `Published Content Briefing, ${new Date().toLocaleDateString("de-DE")}`;
   const { data: digest, error: digestErr } = await c.from("digests").insert({
     company_id: co.id,
     type: "top_post",
@@ -96,127 +109,86 @@ export async function handle(
   }).select().single();
   if (digestErr || !digest) throw new Error(`digest: ${digestErr?.message}`);
 
-  const digestItems = summarizedItems.map((item) => {
-    const original = topItems.find((candidate) => candidate.url === item.url);
-    return {
+  const digestItems = contentClusters.flatMap(cluster =>
+    cluster.published_items.map(item => ({
       digest_id: digest.id,
-      cluster: "Top 10 veröffentlichte Artikel & Beiträge",
+      cluster: cluster.topic_name,
       title: item.title,
-      summary: item.summary,
+      summary: cluster.summary,
       source_url: item.url,
       source_name: item.source,
-      source_tier: original?.source_tier ?? null,
+      source_tier: topItems.find(t => t.url === item.url)?.source_tier ?? null,
       published_at: item.published_at,
-      raw_json: {
-        ...(original?.raw ?? {}),
-        score: item.score,
-        why_relevant: item.why_relevant,
-        strategic_value: item.strategic_value,
-        key_takeaways: item.key_takeaways,
-      },
-    };
-  });
+      raw_json: { score: item.score },
+    }))
+  );
 
   if (digestItems.length > 0) {
-    const { error: itemsErr } = await c.from("digest_items").insert(
-      digestItems,
-    );
+    const { error: itemsErr } = await c.from("digest_items").insert(digestItems);
     if (itemsErr) throw new Error(itemsErr.message);
   }
 
   return {
     digest_id: digest.id,
-    top_articles: summarizedItems.length,
-    items_total: digestItems.length,
+    clusters: contentClusters.length,
+    total_items: digestItems.length,
   };
 }
 
-async function loadVoteSignals(
-  c: SupabaseClient,
-  companyId: string,
-): Promise<TopPostVoteSignals> {
-  const byUrl = new Map<string, number>();
-  const bySource = new Map<string, number>();
-
-  const { data: digests, error: digestErr } = await c
-    .from("digests")
-    .select("id")
-    .eq("company_id", companyId)
-    .eq("type", "top_post")
-    .order("generated_at", { ascending: false })
-    .limit(20);
-  if (digestErr || !digests?.length) return { byUrl, bySource };
-
-  const digestIds = digests.map((digest) => digest.id);
-  const { data: items, error: itemErr } = await c
-    .from("digest_items")
-    .select("id, source_url, source_name")
-    .in("digest_id", digestIds);
-  if (itemErr || !items?.length) return { byUrl, bySource };
-
-  const itemById = new Map<
-    string,
-    { source_url: string | null; source_name: string | null }
-  >();
-  for (
-    const item of items as {
-      id: string;
-      source_url: string | null;
-      source_name: string | null;
-    }[]
-  ) {
-    itemById.set(item.id, {
-      source_url: item.source_url,
-      source_name: item.source_name,
-    });
-  }
-
-  const { data: votes, error: voteErr } = await c
-    .from("votes")
-    .select("target_id, value")
-    .eq("target_type", "item")
-    .in("target_id", [...itemById.keys()]);
-  if (voteErr || !votes?.length) return { byUrl, bySource };
-
-  for (const vote of votes as { target_id: string; value: number }[]) {
-    const item = itemById.get(vote.target_id);
-    if (!item) continue;
-    const urlKey = normalizeUrl(item.source_url);
-    if (urlKey) byUrl.set(urlKey, (byUrl.get(urlKey) ?? 0) + vote.value);
-    if (item.source_name) {
-      bySource.set(
-        item.source_name,
-        (bySource.get(item.source_name) ?? 0) + vote.value,
-      );
-    }
-  }
-
-  return { byUrl, bySource };
-}
-
-function selectTopItems(
+async function clusterByTopic(
   items: NewsItem[],
-  limit: number,
-  voteSignals: TopPostVoteSignals,
-): NewsItem[] {
-  return [...items]
-    .sort((a, b) => itemRank(b, voteSignals) - itemRank(a, voteSignals))
-    .slice(0, limit);
+): Promise<{ topic: string; item_indices: number[] }[]> {
+  const itemList = items
+    .map((item, i) => `[${i}] ${item.source_name} | ▲${item.score ?? "?"} | ${item.title}`)
+    .join("\n");
+
+  try {
+    const result = await callClaudeJSON<{ clusters: { topic: string; item_indices: number[] }[] }>({
+      model: DEFAULT_MODEL,
+      system: CLUSTER_PROMPT,
+      messages: [{ role: "user", content: `Items:\n${itemList}` }],
+      max_tokens: 1500,
+      temperature: 0,
+    });
+    return result.clusters ?? [];
+  } catch {
+    return [{ topic: "Trending dieser Woche", item_indices: items.map((_, i) => i) }];
+  }
 }
 
-function itemRank(item: NewsItem, voteSignals: TopPostVoteSignals): number {
+async function synthCluster(items: NewsItem[], co: Company) {
+  const itemList = items
+    .map(item =>
+      `- [${item.source_name} | ▲${item.score ?? "?"}] ${item.title}` +
+      (item.raw?.excerpt ? `\n  ${String(item.raw.excerpt).slice(0, 300)}` : "")
+    )
+    .join("\n\n");
+
+  const system = SYNTH_PROMPT
+    .replace("{company}", co.name ?? co.url ?? "")
+    .replace("{industry}", co.industry ?? "")
+    .replace("{niche}", co.niche ?? "")
+    .replace("{product}", co.product_description ?? co.tagline ?? "")
+    .replace("{icp}", co.icp ?? "");
+
+  try {
+    return await callClaudeJSON<{ summary: string; why_relevant: string; key_takeaways: string[] }>({
+      model: DEFAULT_MODEL,
+      system,
+      messages: [{ role: "user", content: `Veröffentlichte Inhalte:\n\n${itemList}` }],
+      max_tokens: 1200,
+      temperature: 0,
+    });
+  } catch {
+    return { summary: items.map(i => i.title).join("; "), why_relevant: "", key_takeaways: [] };
+  }
+}
+
+function itemRank(item: NewsItem): number {
   const score = item.score ?? 0;
-  const tierBoost = item.source_tier === 1
-    ? 60
-    : item.source_tier === 2
-    ? 35
-    : 10;
+  const tierBoost = item.source_tier === 1 ? 60 : item.source_tier === 2 ? 35 : 10;
   const ageBoost = recencyBoost(item.published_at);
-  const urlVoteBoost = (voteSignals.byUrl.get(normalizeUrl(item.url)) ?? 0) *
-    25;
-  const sourceVoteBoost = (voteSignals.bySource.get(item.source_name) ?? 0) *
-    6;
-  return score + tierBoost + ageBoost + urlVoteBoost + sourceVoteBoost;
+  return score + tierBoost + ageBoost;
 }
 
 function recencyBoost(publishedAt: string | null): number {
@@ -225,81 +197,4 @@ function recencyBoost(publishedAt: string | null): number {
   if (!Number.isFinite(ageMs) || ageMs < 0) return 10;
   const ageDays = ageMs / 86_400_000;
   return Math.max(0, 14 - ageDays * 2);
-}
-
-function normalizeUrl(url: string | null): string {
-  if (!url) return "";
-  try {
-    const parsed = new URL(url);
-    parsed.hash = "";
-    parsed.search = "";
-    return parsed.toString().replace(/\/$/, "").toLowerCase();
-  } catch {
-    return url.replace(/[?#].*$/, "").replace(/\/$/, "").toLowerCase();
-  }
-}
-
-async function summarizeItem(
-  item: NewsItem,
-  co: Company,
-): Promise<PublishedContentItem> {
-  try {
-    const synth = await synthItem(item, co);
-    return {
-      title: item.title,
-      url: item.url,
-      score: item.score,
-      source: item.source_name,
-      published_at: item.published_at,
-      ...synth,
-    };
-  } catch (err) {
-    console.error("top-post item synth failed " + item.title, err);
-    return {
-      title: item.title,
-      url: item.url,
-      score: item.score,
-      source: item.source_name,
-      published_at: item.published_at,
-      summary: item.title,
-      why_relevant: "",
-      strategic_value: "",
-      key_takeaways: [],
-    };
-  }
-}
-
-async function synthItem(item: NewsItem, co: Company) {
-  const excerpt = typeof item.raw?.description === "string"
-    ? item.raw.description
-    : typeof item.raw?.excerpt === "string"
-    ? item.raw.excerpt
-    : "";
-  const system = SYNTH_PROMPT
-    .replace(/{company}/g, co.name ?? co.url ?? "")
-    .replace("{industry}", co.industry ?? "")
-    .replace("{niche}", co.niche ?? "")
-    .replace("{product}", co.product_description ?? co.tagline ?? "")
-    .replace("{icp}", co.icp ?? "");
-  return await callClaudeJSON<
-    {
-      summary: string;
-      why_relevant: string;
-      strategic_value: string;
-      key_takeaways: string[];
-    }
-  >({
-    model: DEFAULT_MODEL,
-    system,
-    messages: [{
-      role: "user",
-      content: `Titel: ${item.title}\nQuelle: ${item.source_name}\nScore: ${
-        item.score ?? "n/a"
-      }\nDatum: ${
-        item.published_at ?? "kein Datum"
-      }\nURL: ${item.url}\nExzerpt: ${excerpt}`,
-    }],
-    max_tokens: 1000,
-    temperature: 0,
-  });
 }

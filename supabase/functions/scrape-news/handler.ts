@@ -59,6 +59,8 @@ export async function handle(
     // deno-lint-ignore no-explicit-any
     const source = (row as any).sources as Source;
     if (!source) continue;
+    // Community engagement sources (reddit, hackernews, producthunt) live in top_post_scrape — skip here.
+    if (source.type === "reddit" || source.type === "hackernews" || source.type === "producthunt") continue;
     const sourceId = (row as { source_id: string }).source_id;
     for (const alias of sourceAliases(source)) {
       sourceIdsByName[alias] = sourceId;
