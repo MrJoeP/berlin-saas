@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight, RefreshCw, ChevronDown, ChevronRight, Plus, LogOut, Rss, ExternalLink } from "lucide-react";
 import { NicheNewsDigest } from "@/features/niche-news/NicheNewsDigest";
-import { TopPostDigest, type HookCluster } from "@/features/top-posts/TopPostDigest";
+import { TopPostDigest, type PublishedContentCluster } from "@/features/top-posts/TopPostDigest";
 import {
   supabase,
   type Company,
@@ -45,7 +45,7 @@ type CompanyContextDraft = {
 
 const TYPE_LABELS: Record<Digest["type"], string> = {
   niche_news: "Niche News",
-  top_post: "Top Posts",
+  top_post: "Published Content",
   competitor: "Wettbewerb",
   ugc: "UGC",
 };
@@ -67,7 +67,7 @@ const TIER_COLORS: Record<1 | 2 | 3, string> = {
 const TOP_POST_SOURCES: { name: string; type: string; tier: 1 | 2 | 3; note: string }[] = [
   { name: "Hacker News", type: "Algolia API", tier: 2, note: "score ≥ 50, nach Keywords gefiltert" },
   { name: "Product Hunt", type: "RSS", tier: 2, note: "neueste Launches, nach Keywords gefiltert" },
-  { name: "Reddit", type: "Search API", tier: 3, note: "Top Posts der Woche, echte Upvote-Scores" },
+  { name: "Reddit", type: "Search API", tier: 3, note: "veröffentlichte Beiträge der Woche, echte Upvote-Scores" },
   { name: "Twitter/X", type: "Nitter RSS", tier: 2, note: "min. 100 Likes, kein Retweet" },
   { name: "LinkedIn (via Google)", type: "News RSS", tier: 2, note: "site:linkedin.com/posts + Keywords" },
   { name: "Dev.to", type: "API", tier: 3, note: "Top Artikel nach Keyword-Tag, Reactions-Score" },
@@ -88,7 +88,7 @@ function TopPostSourcePanel({ items }: { items: DigestItem[] }) {
             <CardTitle>Quellen</CardTitle>
             <CardDescription>
               {items.length > 0
-                ? `${items.length} Posts aus letztem Scrape · HN · Product Hunt · LinkedIn · Dev.to`
+                ? `${items.length} veröffentlichte Inhalte aus letztem Scrape · HN · Product Hunt · LinkedIn · Dev.to`
                 : "HN · Product Hunt · LinkedIn (via Google) · Dev.to"}
             </CardDescription>
           </div>
@@ -823,7 +823,12 @@ export function Dashboard() {
           </div>
         </CardHeader>
         <CardContent>
-          <TopPostDigest clusterAnalyses={(d.cluster_analyses ?? []) as unknown as HookCluster[]} />
+          <TopPostDigest
+            clusterAnalyses={(d.cluster_analyses ?? []) as unknown as PublishedContentCluster[]}
+            items={d.items}
+            onVote={voteItem}
+            votes={votes}
+          />
         </CardContent>
       </Card>
     );
@@ -923,7 +928,7 @@ export function Dashboard() {
         {/* Tool-Auswahl */}
         <div className="flex gap-0 mb-6 border-b border-[var(--color-border)]">
           {(["niche_news", "top_post"] as const).map((tool) => {
-            const label = tool === "niche_news" ? "Niche News" : "Top Posts";
+            const label = tool === "niche_news" ? "Niche News" : "Published Content";
             const active = selectedTool === tool;
             return (
               <button
@@ -973,7 +978,7 @@ export function Dashboard() {
           </div>
         )}
 
-        {/* Top Posts */}
+        {/* Published Content */}
         {selectedTool === "top_post" && (
           <div>
             <TopPostSourcePanel items={latestTopPost?.items ?? []} />
@@ -986,14 +991,14 @@ export function Dashboard() {
               <Card>
                 <CardContent className="text-center py-12">
                   <p className="text-sm text-[var(--color-fg)] mb-2">
-                    Noch kein Top-Post-Digest. Scrapet HN, Reddit, Google News, Dev.to der letzten 7 Tage.
+                    Noch kein Published-Content-Briefing. Sammelt veröffentlichte Artikel, Beiträge und Launches der letzten 7 Tage.
                   </p>
                   <p className="text-xs text-[var(--color-muted)] mb-6">
                     Dauert ca. 1–2 Minuten.
                   </p>
                   <Button variant="secondary" onClick={triggerTopPost} disabled={triggering}>
                     <ArrowRight className="w-4 h-4 mr-1" />
-                    {triggering ? "Queue..." : "Top-Post-Digest generieren"}
+                    {triggering ? "Queue..." : "Veröffentlichungen sammeln"}
                   </Button>
                 </CardContent>
               </Card>

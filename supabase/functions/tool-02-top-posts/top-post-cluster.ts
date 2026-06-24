@@ -1,26 +1,38 @@
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { Job, NewsItem, Company } from "../_shared/types.ts";
+import { Company, Job, NewsItem } from "../_shared/types.ts";
 import { callClaudeJSON, DEFAULT_MODEL } from "../_shared/claude.ts";
 
-interface HookCluster {
-  pattern_name: string;
-  format_typ: string;
-  plattform_mix: string[];
-  was_geht_viral: string;
-  hook_einstieg: string;
-  warum_es_funktioniert: string;
-  zielgruppe_reaktion: string;
-  plattform_staerke: string;
-  winkel_fuer_eigenen_post: string;
-  beispiele: { title: string; url: string; score: number | null; source: string }[];
+interface PublishedContentItem {
+  title: string;
+  url: string;
+  score: number | null;
+  source: string;
+  published_at: string | null;
+  summary: string;
+  why_relevant: string;
+  strategic_value: string;
+  key_takeaways: string[];
 }
 
-const CLUSTER_PROMPT = `Du analysierst Top-Posts der letzten Woche und erkennst Hook-Muster.
-Clustere die Posts nach ihrem dominanten Hook-Muster. 4-8 Cluster.
-Antworte nur JSON:
-{"clusters":[{"pattern_name":"...","format_typ":"list|story|contrarian|data|how-to|opinion|case-study|news","item_indices":[0,2,5]}]}`;
+interface PublishedContentCluster {
+  topic_name: string;
+  content_type: "top_articles";
+  source_mix: string[];
+  summary: string;
+  why_relevant: string;
+  key_takeaways: string[];
+  published_items: PublishedContentItem[];
+}
 
-const SYNTH_PROMPT = `Du bist Content-Stratege und analysierst warum Posts der letzten Woche viral gegangen sind.
+interface TopPostVoteSignals {
+  byUrl: Map<string, number>;
+  bySource: Map<string, number>;
+}
+
+const SYNTH_PROMPT = `Du bist ein präziser Industry-Briefing-Redakteur.
+Du fasst einen veröffentlichten Artikel, Beitrag oder Launch-Post inhaltlich zusammen.
+Analysiere NICHT, warum etwas viral ging. Gib KEINE Hook- oder Copywriting-Beratung.
+Erfinde keine Details, die nicht aus Titel, Quelle, URL oder Exzerpt ableitbar sind.
 
 Firma: {company}
 Industrie: {industry}
@@ -30,133 +42,264 @@ ICP: {icp}
 
 Antworte JSON:
 {
-  "was_geht_viral": "2-3 Sätze was diese Posts gemeinsam haben",
-  "hook_einstieg": "Wie die Posts beginnen — konkrete Formulierungsbeispiele",
-  "warum_es_funktioniert": "Psychologische Erklärung, kurz und präzise",
-  "zielgruppe_reaktion": "Wer reagiert darauf und warum",
-  "plattform_staerke": "Auf welcher Plattform funktioniert das am besten und warum",
-  "winkel_fuer_eigenen_post": "Konkrete Empfehlung: Wie kann {company} dieses Muster nutzen? Spezifisch auf Produkt und ICP bezogen."
+  "summary": "3-5 Sätze: worum es in diesem konkreten veröffentlichten Inhalt geht",
+  "why_relevant": "1-3 Sätze: warum dieser Inhalt für Firma, Industrie oder ICP relevant sein kann",
+  "strategic_value": "1 konkreter Mehrwert: welche Produkt-, Content-, Sales- oder Marktbeobachtung daraus abgeleitet werden kann",
+  "key_takeaways": ["3-5 kurze Takeaways aus dem Inhalt"]
 }`;
 
-export async function handle(job: Job, c: SupabaseClient): Promise<Record<string, unknown>> {
+export async function handle(
+  job: Job,
+  c: SupabaseClient,
+): Promise<Record<string, unknown>> {
   if (!job.company_id) throw new Error("need company_id");
   const items = (job.payload.items ?? []) as NewsItem[];
   if (items.length === 0) return { message: "keine items" };
 
-  const { data: co } = await c.from("companies").select("*").eq("id", job.company_id).single();
+  const { data: co } = await c.from("companies").select("*").eq(
+    "id",
+    job.company_id,
+  ).single();
   if (!co) throw new Error(`Company ${job.company_id} not found`);
 
-  const clusters = await clusterPosts(items, co as Company);
-
-  const hookClusters = await Promise.all(
-    clusters.map(async cl => {
-      const beispiele = cl.items.slice(0, 6).map(i => ({
-        title: i.title,
-        url: i.url,
-        score: i.score,
-        source: i.source_name,
-      }));
-      const plattform_mix = [...new Set(cl.items.map(i => i.source_name))];
-
-      try {
-        const synth = await synthCluster(cl.items, co as Company);
-        return {
-          pattern_name: cl.cluster_name,
-          format_typ: cl.format_typ ?? "news",
-          plattform_mix,
-          ...synth,
-          beispiele,
-        } as HookCluster;
-      } catch (e) {
-        console.error("synth failed " + cl.cluster_name, e);
-        return {
-          pattern_name: cl.cluster_name,
-          format_typ: cl.format_typ ?? "news",
-          plattform_mix,
-          was_geht_viral: cl.items.slice(0, 3).map(i => i.title).join(" / "),
-          hook_einstieg: "",
-          warum_es_funktioniert: "",
-          zielgruppe_reaktion: "",
-          plattform_staerke: "",
-          winkel_fuer_eigenen_post: "",
-          beispiele,
-        } as HookCluster;
-      }
-    })
+  const voteSignals = await loadVoteSignals(c, job.company_id);
+  const topItems = selectTopItems(items, 10, voteSignals);
+  const summarizedItems = await Promise.all(
+    topItems.map((item) => summarizeItem(item, co as Company)),
   );
 
-  const title = `Top-Post-Digest, ${new Date().toLocaleDateString("de-DE")}`;
-  const { data: dg, error: de } = await c.from("digests").insert({
+  const sourceMix = [...new Set(topItems.map((item) => item.source_name))];
+  const contentClusters: PublishedContentCluster[] = [
+    {
+      topic_name: "Top 10 veröffentlichte Artikel & Beiträge",
+      content_type: "top_articles",
+      source_mix: sourceMix,
+      summary: summarizedItems
+        .map((item, idx) => `${idx + 1}. ${item.title}: ${item.summary}`)
+        .join("\n"),
+      why_relevant:
+        "Diese zehn Inhalte sind die stärksten aktuell gefundenen Veröffentlichungen nach Score, Quellenqualität und Aktualität.",
+      key_takeaways: summarizedItems.flatMap((item) => item.key_takeaways)
+        .slice(0, 10),
+      published_items: summarizedItems,
+    },
+  ];
+
+  const title = `Top-10-Artikel-Briefing, ${
+    new Date().toLocaleDateString("de-DE")
+  }`;
+  const { data: digest, error: digestErr } = await c.from("digests").insert({
     company_id: co.id,
     type: "top_post",
     title,
-    cluster_analyses: hookClusters,
+    cluster_analyses: contentClusters,
   }).select().single();
-  if (de || !dg) throw new Error(`digest: ${de?.message}`);
+  if (digestErr || !digest) throw new Error(`digest: ${digestErr?.message}`);
 
-  const di = hookClusters.flatMap(hc => {
-    const cl = clusters.find(x => x.cluster_name === hc.pattern_name);
-    return (cl?.items ?? []).map(item => ({
-      digest_id: dg.id,
-      cluster: hc.pattern_name,
+  const digestItems = summarizedItems.map((item) => {
+    const original = topItems.find((candidate) => candidate.url === item.url);
+    return {
+      digest_id: digest.id,
+      cluster: "Top 10 veröffentlichte Artikel & Beiträge",
       title: item.title,
-      summary: hc.was_geht_viral,
+      summary: item.summary,
       source_url: item.url,
-      source_name: item.source_name,
-      source_tier: item.source_tier,
+      source_name: item.source,
+      source_tier: original?.source_tier ?? null,
       published_at: item.published_at,
-      raw_json: { ...item.raw, score: item.score },
-    }));
+      raw_json: {
+        ...(original?.raw ?? {}),
+        score: item.score,
+        why_relevant: item.why_relevant,
+        strategic_value: item.strategic_value,
+        key_takeaways: item.key_takeaways,
+      },
+    };
   });
 
-  if (di.length > 0) {
-    const { error: ie } = await c.from("digest_items").insert(di);
-    if (ie) throw new Error(ie.message);
+  if (digestItems.length > 0) {
+    const { error: itemsErr } = await c.from("digest_items").insert(
+      digestItems,
+    );
+    if (itemsErr) throw new Error(itemsErr.message);
   }
 
-  return { digest_id: dg.id, clusters: hookClusters.length, items_total: di.length };
+  return {
+    digest_id: digest.id,
+    top_articles: summarizedItems.length,
+    items_total: digestItems.length,
+  };
 }
 
-async function clusterPosts(items: NewsItem[], co: Company) {
-  const list = items
-    .map((i, idx) => `[${idx}] ${i.score ? `▲${i.score} ` : ""}${i.title} (${i.source_name})`)
-    .join("\n");
-  const r = await callClaudeJSON<{ clusters: { pattern_name: string; format_typ: string; item_indices: number[] }[] }>({
-    model: DEFAULT_MODEL,
-    system: CLUSTER_PROMPT,
-    messages: [{
-      role: "user",
-      content: `Industrie: ${co.industry ?? ""}\nNische: ${(co as any).niche ?? ""}\nKeywords: ${(co.keywords ?? []).join(", ")}\n\nPosts:\n${list}`,
-    }],
-    max_tokens: 2000,
-  });
-  return r.clusters.map(x => ({
-    cluster_name: x.pattern_name,
-    format_typ: x.format_typ,
-    items: x.item_indices.map(i => items[i]).filter(Boolean),
-  }));
+async function loadVoteSignals(
+  c: SupabaseClient,
+  companyId: string,
+): Promise<TopPostVoteSignals> {
+  const byUrl = new Map<string, number>();
+  const bySource = new Map<string, number>();
+
+  const { data: digests, error: digestErr } = await c
+    .from("digests")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("type", "top_post")
+    .order("generated_at", { ascending: false })
+    .limit(20);
+  if (digestErr || !digests?.length) return { byUrl, bySource };
+
+  const digestIds = digests.map((digest) => digest.id);
+  const { data: items, error: itemErr } = await c
+    .from("digest_items")
+    .select("id, source_url, source_name")
+    .in("digest_id", digestIds);
+  if (itemErr || !items?.length) return { byUrl, bySource };
+
+  const itemById = new Map<
+    string,
+    { source_url: string | null; source_name: string | null }
+  >();
+  for (
+    const item of items as {
+      id: string;
+      source_url: string | null;
+      source_name: string | null;
+    }[]
+  ) {
+    itemById.set(item.id, {
+      source_url: item.source_url,
+      source_name: item.source_name,
+    });
+  }
+
+  const { data: votes, error: voteErr } = await c
+    .from("votes")
+    .select("target_id, value")
+    .eq("target_type", "item")
+    .in("target_id", [...itemById.keys()]);
+  if (voteErr || !votes?.length) return { byUrl, bySource };
+
+  for (const vote of votes as { target_id: string; value: number }[]) {
+    const item = itemById.get(vote.target_id);
+    if (!item) continue;
+    const urlKey = normalizeUrl(item.source_url);
+    if (urlKey) byUrl.set(urlKey, (byUrl.get(urlKey) ?? 0) + vote.value);
+    if (item.source_name) {
+      bySource.set(
+        item.source_name,
+        (bySource.get(item.source_name) ?? 0) + vote.value,
+      );
+    }
+  }
+
+  return { byUrl, bySource };
 }
 
-async function synthCluster(items: NewsItem[], co: Company) {
-  const list = items.map(i => `- ${i.score ? `[▲${i.score}] ` : ""}${i.title} | ${i.source_name}`).join("\n");
+function selectTopItems(
+  items: NewsItem[],
+  limit: number,
+  voteSignals: TopPostVoteSignals,
+): NewsItem[] {
+  return [...items]
+    .sort((a, b) => itemRank(b, voteSignals) - itemRank(a, voteSignals))
+    .slice(0, limit);
+}
+
+function itemRank(item: NewsItem, voteSignals: TopPostVoteSignals): number {
+  const score = item.score ?? 0;
+  const tierBoost = item.source_tier === 1
+    ? 60
+    : item.source_tier === 2
+    ? 35
+    : 10;
+  const ageBoost = recencyBoost(item.published_at);
+  const urlVoteBoost = (voteSignals.byUrl.get(normalizeUrl(item.url)) ?? 0) *
+    25;
+  const sourceVoteBoost = (voteSignals.bySource.get(item.source_name) ?? 0) *
+    6;
+  return score + tierBoost + ageBoost + urlVoteBoost + sourceVoteBoost;
+}
+
+function recencyBoost(publishedAt: string | null): number {
+  if (!publishedAt) return 0;
+  const ageMs = Date.now() - new Date(publishedAt).getTime();
+  if (!Number.isFinite(ageMs) || ageMs < 0) return 10;
+  const ageDays = ageMs / 86_400_000;
+  return Math.max(0, 14 - ageDays * 2);
+}
+
+function normalizeUrl(url: string | null): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    parsed.hash = "";
+    parsed.search = "";
+    return parsed.toString().replace(/\/$/, "").toLowerCase();
+  } catch {
+    return url.replace(/[?#].*$/, "").replace(/\/$/, "").toLowerCase();
+  }
+}
+
+async function summarizeItem(
+  item: NewsItem,
+  co: Company,
+): Promise<PublishedContentItem> {
+  try {
+    const synth = await synthItem(item, co);
+    return {
+      title: item.title,
+      url: item.url,
+      score: item.score,
+      source: item.source_name,
+      published_at: item.published_at,
+      ...synth,
+    };
+  } catch (err) {
+    console.error("top-post item synth failed " + item.title, err);
+    return {
+      title: item.title,
+      url: item.url,
+      score: item.score,
+      source: item.source_name,
+      published_at: item.published_at,
+      summary: item.title,
+      why_relevant: "",
+      strategic_value: "",
+      key_takeaways: [],
+    };
+  }
+}
+
+async function synthItem(item: NewsItem, co: Company) {
+  const excerpt = typeof item.raw?.description === "string"
+    ? item.raw.description
+    : typeof item.raw?.excerpt === "string"
+    ? item.raw.excerpt
+    : "";
   const system = SYNTH_PROMPT
     .replace(/{company}/g, co.name ?? co.url ?? "")
     .replace("{industry}", co.industry ?? "")
-    .replace("{niche}", (co as any).niche ?? "")
-    .replace("{product}", (co as any).product_description ?? "")
-    .replace("{icp}", (co as any).icp ?? "");
-  return await callClaudeJSON<{
-    was_geht_viral: string;
-    hook_einstieg: string;
-    warum_es_funktioniert: string;
-    zielgruppe_reaktion: string;
-    plattform_staerke: string;
-    winkel_fuer_eigenen_post: string;
-  }>({
+    .replace("{niche}", co.niche ?? "")
+    .replace("{product}", co.product_description ?? co.tagline ?? "")
+    .replace("{icp}", co.icp ?? "");
+  return await callClaudeJSON<
+    {
+      summary: string;
+      why_relevant: string;
+      strategic_value: string;
+      key_takeaways: string[];
+    }
+  >({
     model: DEFAULT_MODEL,
     system,
-    messages: [{ role: "user", content: list }],
-    max_tokens: 1200,
+    messages: [{
+      role: "user",
+      content: `Titel: ${item.title}\nQuelle: ${item.source_name}\nScore: ${
+        item.score ?? "n/a"
+      }\nDatum: ${
+        item.published_at ?? "kein Datum"
+      }\nURL: ${item.url}\nExzerpt: ${excerpt}`,
+    }],
+    max_tokens: 1000,
     temperature: 0,
   });
 }

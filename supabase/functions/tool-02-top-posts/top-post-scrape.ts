@@ -4,12 +4,17 @@ import { Job, NewsItem } from "../_shared/types.ts";
 const MAX_PER_SOURCE = 30;
 const WINDOW_DAYS = 7;
 
-export async function handle(job: Job, c: SupabaseClient): Promise<Record<string, unknown>> {
+export async function handle(
+  job: Job,
+  c: SupabaseClient,
+): Promise<Record<string, unknown>> {
   if (!job.company_id) throw new Error("need company_id");
 
   const { data: co } = await c
     .from("companies")
-    .select("name, industry, niche, keywords, icp, product_description, target_market")
+    .select(
+      "name, industry, niche, keywords, icp, product_description, target_market",
+    )
     .eq("id", job.company_id)
     .single();
   if (!co) throw new Error(`Company ${job.company_id} not found`);
@@ -31,8 +36,10 @@ export async function handle(job: Job, c: SupabaseClient): Promise<Record<string
   ]);
 
   const items: NewsItem[] = results
-    .filter((r): r is PromiseFulfilledResult<NewsItem[]> => r.status === "fulfilled")
-    .flatMap(r => r.value);
+    .filter((r): r is PromiseFulfilledResult<NewsItem[]> =>
+      r.status === "fulfilled"
+    )
+    .flatMap((r) => r.value);
 
   const deduped = dedup(items);
 
@@ -48,7 +55,11 @@ export async function handle(job: Job, c: SupabaseClient): Promise<Record<string
   return { items_found: deduped.length, cluster_job_id: cj?.id };
 }
 
-async function fetchHN(query: string, kw: string[], sinceTs: number): Promise<NewsItem[]> {
+async function fetchHN(
+  query: string,
+  kw: string[],
+  sinceTs: number,
+): Promise<NewsItem[]> {
   const u = new URL("https://hn.algolia.com/api/v1/search");
   u.searchParams.set("query", query);
   u.searchParams.set("tags", "story");
@@ -66,21 +77,29 @@ async function fetchHN(query: string, kw: string[], sinceTs: number): Promise<Ne
       source_tier: 2,
       published_at: h.created_at,
       score: h.points ?? 0,
-      raw: { source_type: "hackernews", comments: h.num_comments, hn_id: h.objectID },
+      raw: {
+        source_type: "hackernews",
+        comments: h.num_comments,
+        hn_id: h.objectID,
+      },
     }));
 }
 
 async function fetchProductHunt(kw: string[]): Promise<NewsItem[]> {
   const xml = await fetchRss("https://www.producthunt.com/feed");
   return parseRss(xml, "Product Hunt", 2)
-    .filter(i => matchesKw(i.title, kw))
+    .filter((i) => matchesKw(i.title, kw))
     .slice(0, MAX_PER_SOURCE);
 }
 
-async function fetchGoogleNews(name: string, kw: string[]): Promise<NewsItem[]> {
+async function fetchGoogleNews(
+  name: string,
+  kw: string[],
+): Promise<NewsItem[]> {
   const terms = [name, ...kw.slice(0, 2)].filter(Boolean).join(" OR ");
   const q = encodeURIComponent(terms);
-  const url = `https://news.google.com/rss/search?q=${q}&tbs=qdr:w&hl=en-US&gl=US&ceid=US:en`;
+  const url =
+    `https://news.google.com/rss/search?q=${q}&tbs=qdr:w&hl=en-US&gl=US&ceid=US:en`;
   const xml = await fetchRss(url);
   return parseRss(xml, "Google News", 2).slice(0, MAX_PER_SOURCE);
 }
@@ -91,19 +110,22 @@ async function fetchDevTo(kw: string[], sinceTs: number): Promise<NewsItem[]> {
   const xml = await fetchRss(`https://dev.to/feed/tag/${tag}`);
   const since = new Date(sinceTs * 1000);
   return parseRss(xml, "Dev.to", 3)
-    .filter(i => !i.published_at || new Date(i.published_at) >= since)
+    .filter((i) => !i.published_at || new Date(i.published_at) >= since)
     .slice(0, MAX_PER_SOURCE);
 }
 
 async function fetchReddit(query: string, kw: string[]): Promise<NewsItem[]> {
   const q = encodeURIComponent(query);
-  const url = `https://www.reddit.com/search.json?q=${q}&sort=top&t=week&limit=25`;
-  const r = await fetch(url, { headers: { "user-agent": "berlin-saas-bot/1.0" } });
+  const url =
+    `https://www.reddit.com/search.json?q=${q}&sort=top&t=week&limit=25`;
+  const r = await fetch(url, {
+    headers: { "user-agent": "berlin-saas-bot/1.0" },
+  });
   if (!r.ok) throw new Error(`Reddit: ${r.status}`);
   const data = await r.json();
   const posts = (data?.data?.children ?? []) as any[];
   return posts
-    .filter(p => p.data.score >= 20 && matchesKw(p.data.title, kw))
+    .filter((p) => p.data.score >= 20 && matchesKw(p.data.title, kw))
     .map((p): NewsItem => ({
       title: p.data.title,
       url: p.data.url ?? `https://reddit.com${p.data.permalink}`,
@@ -111,7 +133,12 @@ async function fetchReddit(query: string, kw: string[]): Promise<NewsItem[]> {
       source_tier: 2,
       published_at: new Date(p.data.created_utc * 1000).toISOString(),
       score: p.data.score,
-      raw: { source_type: "reddit", subreddit: p.data.subreddit, comments: p.data.num_comments },
+      raw: {
+        source_type: "reddit",
+        subreddit: p.data.subreddit,
+        comments: p.data.num_comments,
+        excerpt: p.data.selftext?.slice(0, 600) ?? "",
+      },
     }));
 }
 
@@ -119,7 +146,10 @@ async function fetchRss(url: string): Promise<string> {
   const ac = new AbortController();
   const tm = setTimeout(() => ac.abort(), 12000);
   try {
-    const r = await fetch(url, { headers: { "user-agent": "berlin-saas-bot/1.0" }, signal: ac.signal });
+    const r = await fetch(url, {
+      headers: { "user-agent": "berlin-saas-bot/1.0" },
+      signal: ac.signal,
+    });
     clearTimeout(tm);
     if (!r.ok) throw new Error(`${url}: ${r.status}`);
     return await r.text();
@@ -129,19 +159,35 @@ async function fetchRss(url: string): Promise<string> {
   }
 }
 
-function parseRss(xml: string, sourceName: string, tier: 1 | 2 | 3): NewsItem[] {
+function parseRss(
+  xml: string,
+  sourceName: string,
+  tier: 1 | 2 | 3,
+): NewsItem[] {
   const items: NewsItem[] = [];
   const ER = /<(?:item|entry)[\s\S]*?<\/(?:item|entry)>/gi;
   const TR = /<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i;
   const LR = /<link[^>]*?(?:href="([^"]+)"|>([^<]+)<\/link>)/i;
-  const DR = /<(pubDate|published|updated)[^>]*>([\s\S]*?)<\/(pubDate|published|updated)>/i;
+  const DR =
+    /<(pubDate|published|updated)[^>]*>([\s\S]*?)<\/(pubDate|published|updated)>/i;
+  const SR =
+    /<(description|summary|content:encoded)[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/(description|summary|content:encoded)>/i;
   for (const b of xml.match(ER) ?? []) {
     const t = b.match(TR)?.[1]?.trim() ?? "";
     const lm = b.match(LR);
     const u = (lm?.[1] ?? lm?.[2] ?? "").trim();
     const ds = b.match(DR)?.[2]?.trim();
+    const description = stripTags(b.match(SR)?.[2]?.trim() ?? "").slice(0, 800);
     if (!t || !u) continue;
-    items.push({ title: t, url: u, source_name: sourceName, source_tier: tier, published_at: ds ? iso(ds) : null, score: null, raw: { source_type: "rss" } });
+    items.push({
+      title: t,
+      url: u,
+      source_name: sourceName,
+      source_tier: tier,
+      published_at: ds ? iso(ds) : null,
+      score: null,
+      raw: { source_type: "rss", description },
+    });
   }
   return items;
 }
@@ -149,12 +195,12 @@ function parseRss(xml: string, sourceName: string, tier: 1 | 2 | 3): NewsItem[] 
 function matchesKw(text: string, kw: string[]): boolean {
   if (kw.length === 0) return true;
   const t = text.toLowerCase();
-  return kw.some(k => t.includes(k.toLowerCase()));
+  return kw.some((k) => t.includes(k.toLowerCase()));
 }
 
 function dedup(items: NewsItem[]): NewsItem[] {
   const seen = new Set<string>();
-  return items.filter(i => {
+  return items.filter((i) => {
     const k = i.url.replace(/[^a-z0-9]/gi, "").toLowerCase().slice(0, 100);
     if (seen.has(k)) return false;
     seen.add(k);
@@ -163,5 +209,14 @@ function dedup(items: NewsItem[]): NewsItem[] {
 }
 
 function iso(s: string): string | null {
-  try { const d = new Date(s); return isNaN(d.getTime()) ? null : d.toISOString(); } catch { return null; }
+  try {
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  } catch {
+    return null;
+  }
+}
+
+function stripTags(s: string): string {
+  return s.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
