@@ -32,6 +32,7 @@ export async function handle(job: Job, c: SupabaseClient): Promise<Record<string
 
   const redditSubs: string[] = [];
   const hnConfigs: { query: string; minScore: number }[] = [];
+  const rssConfigs: { name: string; url: string }[] = [];
 
   for (const row of companySources ?? []) {
     // deno-lint-ignore no-explicit-any
@@ -46,6 +47,11 @@ export async function handle(job: Job, c: SupabaseClient): Promise<Record<string
         minScore: (src.config.min_score ?? src.min_score ?? 50) as number,
       });
     }
+    // User-defined sources explicitly scoped to Published Content.
+    const scope = (src.config?.feed_scope as string | undefined) ?? "niche_news";
+    if ((src.type === "rss" || src.type === "custom") && src.url && (scope === "top_post" || scope === "both")) {
+      rssConfigs.push({ name: src.name as string, url: src.url as string });
+    }
   }
 
   const results = await Promise.allSettled([
@@ -57,6 +63,7 @@ export async function handle(job: Job, c: SupabaseClient): Promise<Record<string
     fetchDevTo(kw, sinceTs),
     fetchRedditSearch(query, kw),
     ...redditSubs.slice(0, 8).map(sub => fetchRedditSub(sub, kw)),
+    ...rssConfigs.slice(0, 10).map(cfg => fetchRssCustom(cfg.url, cfg.name)),
   ]);
 
   const items: NewsItem[] = results
@@ -214,6 +221,16 @@ async function fetchRedditSub(subreddit: string, _kw: string[]): Promise<NewsIte
           excerpt: p.data.selftext?.slice(0, 600) ?? "",
         },
       }));
+  } catch {
+    return [];
+  }
+}
+
+// User-defined RSS feed scoped to Published Content. No engagement score, ranks via tier+recency.
+async function fetchRssCustom(url: string, sourceName: string): Promise<NewsItem[]> {
+  try {
+    const xml = await fetchRss(url);
+    return parseRss(xml, sourceName, 2).slice(0, MAX_PER_SOURCE);
   } catch {
     return [];
   }

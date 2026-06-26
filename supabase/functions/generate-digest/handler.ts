@@ -3,8 +3,8 @@
 // Schreibt: digests (mit cluster_analyses jsonb), digest_items, knowledge_entries.
 //
 // Pipeline:
-//   1. Haiku clustert die Items thematisch (max 6 Cluster).
-//   2. Pro Cluster: Top-3-Article-Bodies fetchen (mit DB-Cache).
+//   1. Haiku clustert die Items thematisch (max 20 Cluster).
+//   2. Pro Cluster: Top-Article-Bodies fetchen (mit DB-Cache).
 //   3. Trend-Memory aus knowledge_entries der letzten 4 Wochen lookuppen.
 //   4. Opus 4.8 generiert pro Cluster strukturierte Deep-Analyse mit
 //      cached system prompt. Parallel via Promise.all.
@@ -28,7 +28,7 @@ import {
 const CLUSTERING_PROMPT =
   `Du erhältst eine Liste von News-Items aus verschiedenen Quellen mit Quellen-Tier (1=Primärquelle, 2=Editorial, 3=Community).
 
-Clustere die Items nach inhaltlichen Themen. 8 bis 14 Cluster (je mehr unterschiedliche Themen es gibt, desto mehr Cluster). Priorisiere Themen mit Tier-1- oder Tier-2-Quellen. Bevorzuge feinere Themen-Trennung — lieber zwei spezifische Cluster als einen breiten. Items mit nicht eindeutigem Theme oder reines Off-Topic-Geschnatter weglassen.
+Clustere die Items nach inhaltlichen Themen. 10 bis 20 Cluster (je mehr unterschiedliche Themen es gibt, desto mehr Cluster). Priorisiere Themen mit Tier-1- oder Tier-2-Quellen. Bevorzuge feinere Themen-Trennung — lieber zwei spezifische Cluster als einen breiten. Items mit nicht eindeutigem Theme oder reines Off-Topic-Geschnatter weglassen.
 
 Antworte nur mit JSON:
 {
@@ -73,7 +73,7 @@ export async function handle(
   // 1. Clustering via Haiku (deterministisch, günstig).
   const rawClusters = await clusterItems(items, company);
   const voteSignals = await loadVoteSignals(client);
-  const clusters = prepareClusters(rawClusters, voteSignals).slice(0, 14);
+  const clusters = prepareClusters(rawClusters, voteSignals).slice(0, 20);
   if (clusters.length === 0) {
     return { message: "Keine validen Cluster, kein Digest erzeugt." };
   }
@@ -302,7 +302,7 @@ async function fetchTopBodies(
     return new Date(b.published_at ?? 0).getTime() -
       new Date(a.published_at ?? 0).getTime();
   });
-  const top = sorted.slice(0, 8);
+  const top = sorted.slice(0, 12);
   return await Promise.all(
     top.map(async (item) => ({
       item,

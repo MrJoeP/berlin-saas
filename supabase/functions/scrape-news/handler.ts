@@ -18,7 +18,7 @@ import {
 } from "../_shared/news_filter.ts";
 
 const MAX_RAW_ITEMS_PER_SOURCE = 150;
-const MAX_FILTERED_ITEMS = 400;
+const MAX_FILTERED_ITEMS = 600;
 
 export async function handle(
   job: Job,
@@ -59,8 +59,11 @@ export async function handle(
     // deno-lint-ignore no-explicit-any
     const source = (row as any).sources as Source;
     if (!source) continue;
-    // Community engagement sources (reddit, hackernews, producthunt) live in top_post_scrape — skip here.
-    if (source.type === "reddit" || source.type === "hackernews" || source.type === "producthunt") continue;
+    // Sources explicitly scoped to Published Content (top_post) must not feed niche news.
+    const feedScope = (source.config as Record<string, unknown> | null)?.feed_scope as string | undefined;
+    if (feedScope === "top_post") continue;
+    // Social media & community engagement sources live in top_post_scrape — skip here.
+    if (source.type === "reddit" || source.type === "hackernews" || source.type === "producthunt" || source.type === "twitter") continue;
     const sourceId = (row as { source_id: string }).source_id;
     for (const alias of sourceAliases(source)) {
       sourceIdsByName[alias] = sourceId;

@@ -309,13 +309,19 @@ function SourceManager({
   health,
   onToggle,
   onAddRss,
+  title = "Sources",
+  description,
+  emptyHint = "Noch keine Quellen aktiv. Füge einen RSS-Feed hinzu oder starte den Company-Scrape erneut.",
 }: {
   sources: CompanySourceRow[];
   health: Record<string, SourceHealth>;
   onToggle: (sourceId: string, active: boolean) => Promise<void>;
   onAddRss: (name: string, url: string) => Promise<void>;
+  title?: string;
+  description?: string;
+  emptyHint?: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [name, setName] = useState("");
   const [rssUrl, setRssUrl] = useState("");
   const [saving, setSaving] = useState(false);
@@ -350,9 +356,9 @@ function SourceManager({
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <CardTitle>Sources</CardTitle>
+            <CardTitle>{title}</CardTitle>
             <CardDescription>
-              {activeCount} aktiv von {sources.length} Quellen
+              {description ?? `${activeCount} aktiv von ${sources.length} Quellen`}
             </CardDescription>
           </div>
           <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)}>
@@ -366,7 +372,7 @@ function SourceManager({
           <div className="grid gap-2 mb-4">
             {sorted.length === 0 ? (
               <p className="text-sm text-[var(--color-muted)]">
-                Noch keine Quellen aktiv. Füge einen RSS-Feed hinzu oder starte den Company-Scrape erneut.
+                {emptyHint}
               </p>
             ) : (
               sorted.map((row) => {
@@ -739,6 +745,19 @@ export function Dashboard() {
       p_company_id: company.id,
       p_name: name,
       p_url: rssUrl,
+      p_feed_scope: "niche_news",
+    });
+    if (error) throw error;
+    await Promise.all([loadSources(company.id), loadSourceHealth(company.id)]);
+  }
+
+  async function addTopPostRssSource(name: string, rssUrl: string) {
+    if (!company) return;
+    const { error } = await supabase.rpc("add_company_rss_source", {
+      p_company_id: company.id,
+      p_name: name,
+      p_url: rssUrl,
+      p_feed_scope: "top_post",
     });
     if (error) throw error;
     await Promise.all([loadSources(company.id), loadSourceHealth(company.id)]);
@@ -807,6 +826,11 @@ export function Dashboard() {
   const nicheNewsDigests = digests.filter((d) => d.type === "niche_news");
   const latestTopPost = topPostDigests[0] ?? null;
   const latestNicheNews = nicheNewsDigests[0] ?? null;
+
+  const feedScopeOf = (row: CompanySourceRow): string =>
+    (row.sources?.config?.feed_scope as string | undefined) ?? "niche_news";
+  const nicheSourceRows = sourceRows.filter((row) => feedScopeOf(row) !== "top_post");
+  const topPostSourceRows = sourceRows.filter((row) => feedScopeOf(row) === "top_post");
 
   function renderTopPost(d: DigestWithItems) {
     return (
@@ -951,7 +975,7 @@ export function Dashboard() {
         {selectedTool === "niche_news" && (
           <div>
             <JobStatusPanel jobs={jobs} />
-            <SourceManager sources={sourceRows} health={sourceHealth} onToggle={toggleSource} onAddRss={addRssSource} />
+            <SourceManager sources={nicheSourceRows} health={sourceHealth} onToggle={toggleSource} onAddRss={addRssSource} />
             {latestNicheNews ? (
               <>
                 {renderNicheNews(latestNicheNews)}
@@ -982,6 +1006,15 @@ export function Dashboard() {
         {selectedTool === "top_post" && (
           <div>
             <TopPostSourcePanel items={latestTopPost?.items ?? []} />
+            <SourceManager
+              sources={topPostSourceRows}
+              health={sourceHealth}
+              onToggle={toggleSource}
+              onAddRss={addTopPostRssSource}
+              title="Eigene Quellen"
+              description="Eigene RSS-Feeds zusätzlich zu den festen Published-Content-Quellen"
+              emptyHint="Noch keine eigenen Quellen. Füge unten einen RSS-Feed hinzu, der nur in Published Content einfließt."
+            />
             {latestTopPost ? (
               <>
                 {renderTopPost(latestTopPost)}
