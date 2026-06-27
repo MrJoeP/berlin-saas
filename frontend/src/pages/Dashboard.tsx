@@ -63,6 +63,17 @@ const TIER_COLORS: Record<1 | 2 | 3, string> = {
   3: "bg-amber-100 text-amber-800 border-amber-300",
 };
 
+// Postgres dow: 0 = Sonntag … 6 = Samstag. Montag zuerst gelistet.
+const WEEKDAYS: { value: number; label: string }[] = [
+  { value: 1, label: "Montag" },
+  { value: 2, label: "Dienstag" },
+  { value: 3, label: "Mittwoch" },
+  { value: 4, label: "Donnerstag" },
+  { value: 5, label: "Freitag" },
+  { value: 6, label: "Samstag" },
+  { value: 0, label: "Sonntag" },
+];
+
 function OlderDigests({
   digests: older, renderDigest,
 }: {
@@ -743,12 +754,11 @@ export function Dashboard() {
     await loadJobs(company.id);
   }
 
-  async function toggleFrequency() {
+  async function setReportWeekday(weekday: number) {
     if (!company) return;
-    const next = company.scan_frequency === "daily" ? "weekly" : "daily";
-    setCompany({ ...company, scan_frequency: next });
-    setAllCompanies((prev) => prev.map((c) => (c.id === company.id ? { ...c, scan_frequency: next } : c)));
-    await supabase.from("companies").update({ scan_frequency: next }).eq("id", company.id);
+    setCompany({ ...company, report_weekday: weekday });
+    setAllCompanies((prev) => prev.map((c) => (c.id === company.id ? { ...c, report_weekday: weekday } : c)));
+    await supabase.from("companies").update({ report_weekday: weekday }).eq("id", company.id);
   }
 
   async function saveCompanyContext(next: {
@@ -896,18 +906,21 @@ export function Dashboard() {
             </p>
           </div>
           <div className="flex gap-2 shrink-0 items-center">
-            <button
-              type="button"
-              onClick={toggleFrequency}
-              className={`text-xs font-medium px-2.5 py-1.5 rounded-md border transition-colors ${
-                company.scan_frequency === "daily"
-                  ? "bg-orange-50 text-orange-700 border-orange-300 hover:bg-orange-100"
-                  : "bg-blue-50 text-blue-700 border-blue-300 hover:bg-blue-100"
-              }`}
-              title={`Aktuell ${company.scan_frequency}. Klick zum Wechseln.`}
-            >
-              {company.scan_frequency === "daily" ? "🟠 Daily" : "🔵 Weekly"}
-            </button>
+            <label className="flex items-center gap-1.5 text-xs text-[var(--color-muted)]">
+              Weekly Report
+              <select
+                value={company.report_weekday ?? 1}
+                onChange={(e) => setReportWeekday(Number(e.target.value))}
+                className="font-medium px-2.5 py-1.5 rounded-md border border-[var(--color-border)] bg-white text-[var(--color-fg)] cursor-pointer hover:bg-[var(--color-bg)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+                title="Wochentag, an dem das wöchentliche Briefing erstellt und versendet wird"
+              >
+                {WEEKDAYS.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    📅 {d.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <Button variant="ghost" size="sm" onClick={() => navigate("/setup")}>
               <Plus className="w-4 h-4 mr-1" />
               Neues Unternehmen

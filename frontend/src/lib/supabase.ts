@@ -47,7 +47,7 @@ export interface Company {
   voice_sample: string | null;
   profile_json: Record<string, unknown>;
   active: boolean;
-  scan_frequency: "daily" | "weekly";
+  report_weekday: number; // Postgres dow: 0 = Sonntag … 6 = Samstag
   created_at: string;
 }
 
