@@ -49,9 +49,15 @@ export function NicheNewsDigest({
     ([, clusterItems]) => clusterItems[0]?.cluster_confidence !== "community",
   );
   const sortedClusters = sortClusterEntries(allClusters, analyses);
+  const isLegacy = analyses.length > 0 && analyses.every((a) => !a.signal_metrics);
 
   return (
     <>
+      {isLegacy && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Älterer Digest ohne Priorisierung und Mehrwert-Felder. Generiere ein neues Briefing für das vollständige Format.
+        </div>
+      )}
       {sortedAnalyses.length > 0 && <BriefingSummary analyses={sortedAnalyses} />}
       <div className="space-y-1">
         {sortedClusters.map(([clusterName, clusterItems]) => {

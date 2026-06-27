@@ -114,19 +114,22 @@ export function TopPostDigest({ clusterAnalyses, items, onVote, votes }: TopPost
     })
     .filter((cluster) => cluster.summary || cluster.publishedItems.length > 0);
 
-  if (clusters.length === 0) {
-    return <p className="text-sm text-[var(--color-muted)] py-4">Keine veröffentlichten Inhalte gefunden.</p>;
-  }
-
   const topItems = clusters
     .flatMap((cluster) => cluster.publishedItems)
     .filter((item) => item.title && item.url)
     .slice(0, 10);
 
+  if (topItems.length === 0) {
+    return (
+      <p className="text-sm text-[var(--color-muted)] py-4">
+        Keine veröffentlichten Inhalte in diesem Digest. Falls er aus einer älteren Version stammt, sammle die Veröffentlichungen neu, um die aktuelle Top-10-Ansicht zu sehen.
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {topItems.length > 0 && (
-        <div className="space-y-3">
+      <div className="space-y-3">
           <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-muted)]">
             Top 10 veröffentlichte Artikel & Beiträge mit Kurzfassung
           </div>
@@ -198,8 +201,7 @@ export function TopPostDigest({ clusterAnalyses, items, onVote, votes }: TopPost
               );
             })}
           </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
