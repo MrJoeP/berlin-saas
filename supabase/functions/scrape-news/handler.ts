@@ -59,10 +59,14 @@ export async function handle(
     // deno-lint-ignore no-explicit-any
     const source = (row as any).sources as Source;
     if (!source) continue;
-    // Sources explicitly scoped to Published Content (top_post) must not feed niche news.
-    const feedScope = (source.config as Record<string, unknown> | null)?.feed_scope as string | undefined;
+    // Niche News = nur Fachartikel. Social-Media-/Foren-Quellen sind dem Published Content vorbehalten.
+    const config = (source.config as Record<string, unknown> | null) ?? {};
+    const feedScope = config.feed_scope as string | undefined;
+    const platform = config.platform as string | undefined;
     if (feedScope === "top_post") continue;
-    // Social media & community engagement sources live in top_post_scrape — skip here.
+    // Social-Media-RSS-Feeds (YouTube/X/LinkedIn) sind als type=rss mit config.platform markiert.
+    if (platform === "YouTube" || platform === "Twitter/X" || platform === "LinkedIn") continue;
+    // Foren / Community-Engagement-Quellen.
     if (source.type === "reddit" || source.type === "hackernews" || source.type === "producthunt" || source.type === "twitter") continue;
     const sourceId = (row as { source_id: string }).source_id;
     for (const alias of sourceAliases(source)) {

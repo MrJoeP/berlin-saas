@@ -47,9 +47,12 @@ export async function handle(job: Job, c: SupabaseClient): Promise<Record<string
         minScore: (src.config.min_score ?? src.min_score ?? 50) as number,
       });
     }
-    // User-defined sources explicitly scoped to Published Content.
+    // RSS-Quellen für Published Content: user-scoped (top_post/both) ODER Social-Media-Feeds (YouTube/X/LinkedIn).
     const scope = (src.config?.feed_scope as string | undefined) ?? "niche_news";
-    if ((src.type === "rss" || src.type === "custom") && src.url && (scope === "top_post" || scope === "both")) {
+    const platform = src.config?.platform as string | undefined;
+    const isUserTopPost = (src.type === "rss" || src.type === "custom") && (scope === "top_post" || scope === "both");
+    const isSocialRss = src.type === "rss" && (platform === "YouTube" || platform === "Twitter/X" || platform === "LinkedIn");
+    if (src.url && (isUserTopPost || isSocialRss)) {
       rssConfigs.push({ name: src.name as string, url: src.url as string });
     }
   }
@@ -63,7 +66,7 @@ export async function handle(job: Job, c: SupabaseClient): Promise<Record<string
     fetchDevTo(kw, sinceTs),
     fetchRedditSearch(query, kw),
     ...redditSubs.slice(0, 8).map(sub => fetchRedditSub(sub, kw)),
-    ...rssConfigs.slice(0, 10).map(cfg => fetchRssCustom(cfg.url, cfg.name)),
+    ...rssConfigs.slice(0, 24).map(cfg => fetchRssCustom(cfg.url, cfg.name)),
   ]);
 
   const items: NewsItem[] = results

@@ -827,10 +827,18 @@ export function Dashboard() {
   const latestTopPost = topPostDigests[0] ?? null;
   const latestNicheNews = nicheNewsDigests[0] ?? null;
 
-  const feedScopeOf = (row: CompanySourceRow): string =>
-    (row.sources?.config?.feed_scope as string | undefined) ?? "niche_news";
-  const nicheSourceRows = sourceRows.filter((row) => feedScopeOf(row) !== "top_post");
-  const topPostSourceRows = sourceRows.filter((row) => feedScopeOf(row) === "top_post");
+  // Published Content bekommt alle Social-/Foren-Quellen + user-scoped top_post Feeds.
+  // Niche News behält nur redaktionelle Fachartikel-Quellen.
+  const isPublishedContentSource = (row: CompanySourceRow): boolean => {
+    const src = row.sources;
+    if (!src) return false;
+    if ((src.config?.feed_scope as string | undefined) === "top_post") return true;
+    const platform = src.config?.platform as string | undefined;
+    if (platform === "YouTube" || platform === "Twitter/X" || platform === "LinkedIn") return true;
+    return ["reddit", "hackernews", "producthunt", "twitter"].includes(src.type);
+  };
+  const nicheSourceRows = sourceRows.filter((row) => !isPublishedContentSource(row));
+  const topPostSourceRows = sourceRows.filter((row) => isPublishedContentSource(row));
 
   function renderTopPost(d: DigestWithItems) {
     return (
@@ -975,7 +983,14 @@ export function Dashboard() {
         {selectedTool === "niche_news" && (
           <div>
             <JobStatusPanel jobs={jobs} />
-            <SourceManager sources={nicheSourceRows} health={sourceHealth} onToggle={toggleSource} onAddRss={addRssSource} />
+            <SourceManager
+              sources={nicheSourceRows}
+              health={sourceHealth}
+              onToggle={toggleSource}
+              onAddRss={addRssSource}
+              title="Fachartikel-Quellen"
+              description="Redaktionelle Artikel & Blogs — Social Media und Foren laufen im Published Content"
+            />
             {latestNicheNews ? (
               <>
                 {renderNicheNews(latestNicheNews)}
@@ -1011,9 +1026,9 @@ export function Dashboard() {
               health={sourceHealth}
               onToggle={toggleSource}
               onAddRss={addTopPostRssSource}
-              title="Eigene Quellen"
-              description="Eigene RSS-Feeds zusätzlich zu den festen Published-Content-Quellen"
-              emptyHint="Noch keine eigenen Quellen. Füge unten einen RSS-Feed hinzu, der nur in Published Content einfließt."
+              title="Community & eigene Quellen"
+              description="Reddit, HN, YouTube, X, LinkedIn & eigene RSS-Feeds — ausschließlich für Published Content"
+              emptyHint="Noch keine Community- oder eigenen Quellen. Füge unten einen RSS-Feed hinzu, der nur in Published Content einfließt."
             />
             {latestTopPost ? (
               <>
