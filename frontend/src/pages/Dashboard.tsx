@@ -440,7 +440,7 @@ function SourceManager({
   );
 }
 
-function JobStatusPanel({ jobs }: { jobs: Job[] }) {
+function JobStatusPanel({ jobs, title = "Founder Briefing" }: { jobs: Job[]; title?: string }) {
   const active = jobs.find((job) => job.status === "running" || job.status === "pending");
   const latest = active ?? jobs[0] ?? null;
   if (!latest) return null;
@@ -463,7 +463,7 @@ function JobStatusPanel({ jobs }: { jobs: Job[] }) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-xs font-semibold">
-            Founder Briefing: {label}
+            {title}: {label}
           </div>
           <p className="text-xs opacity-80 mt-0.5">
             {latest.type}
@@ -803,6 +803,10 @@ export function Dashboard() {
   const nicheSourceRows = sourceRows.filter((row) => isNicheNewsSource(row));
   const topPostSourceRows = sourceRows.filter((row) => isPublishedContentSource(row));
 
+  // Job-Status pro Tab: jeder Tab zeigt nur den Status seiner eigenen Pipeline.
+  const nicheJobs = jobs.filter((job) => job.type.startsWith("niche_news"));
+  const topPostJobs = jobs.filter((job) => job.type.startsWith("top_post"));
+
   function renderTopPost(d: DigestWithItems) {
     return (
       <Card key={d.id}>
@@ -945,7 +949,7 @@ export function Dashboard() {
         {/* Niche News */}
         {selectedTool === "niche_news" && (
           <div>
-            <JobStatusPanel jobs={jobs} />
+            <JobStatusPanel jobs={nicheJobs} title="Niche News Briefing" />
             <SourceManager
               sources={nicheSourceRows}
               health={sourceHealth}
@@ -985,6 +989,7 @@ export function Dashboard() {
         {/* Published Content */}
         {selectedTool === "top_post" && (
           <div>
+            <JobStatusPanel jobs={topPostJobs} title="Published Content" />
             <SourceManager
               sources={topPostSourceRows}
               health={sourceHealth}
