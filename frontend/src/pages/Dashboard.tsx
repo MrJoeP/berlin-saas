@@ -63,73 +63,6 @@ const TIER_COLORS: Record<1 | 2 | 3, string> = {
   3: "bg-amber-100 text-amber-800 border-amber-300",
 };
 
-
-const TOP_POST_SOURCES: { name: string; type: string; tier: 1 | 2 | 3; note: string }[] = [
-  { name: "Hacker News", type: "Algolia API", tier: 2, note: "score ≥ 50, nach Keywords gefiltert" },
-  { name: "Product Hunt", type: "RSS", tier: 2, note: "neueste Launches, nach Keywords gefiltert" },
-  { name: "Reddit", type: "Search API", tier: 3, note: "veröffentlichte Beiträge der Woche, echte Upvote-Scores" },
-  { name: "Twitter/X", type: "Nitter RSS", tier: 2, note: "min. 100 Likes, kein Retweet" },
-  { name: "LinkedIn (via Google)", type: "News RSS", tier: 2, note: "site:linkedin.com/posts + Keywords" },
-  { name: "Dev.to", type: "API", tier: 3, note: "Top Artikel nach Keyword-Tag, Reactions-Score" },
-];
-
-function TopPostSourcePanel({ items }: { items: DigestItem[] }) {
-  const [open, setOpen] = useState(false);
-  const countBySource = items.reduce<Record<string, number>>((acc, i) => {
-    const k = i.source_name ?? "Andere";
-    acc[k] = (acc[k] ?? 0) + 1;
-    return acc;
-  }, {});
-  return (
-    <Card className="mb-4">
-      <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <CardTitle>Quellen</CardTitle>
-            <CardDescription>
-              {items.length > 0
-                ? `${items.length} veröffentlichte Inhalte aus letztem Scrape · HN · Product Hunt · LinkedIn · Dev.to`
-                : "HN · Product Hunt · LinkedIn (via Google) · Dev.to"}
-            </CardDescription>
-          </div>
-          <Button variant="ghost" size="sm" onClick={() => setOpen((v) => !v)}>
-            {open ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
-            Quellen
-          </Button>
-        </div>
-      </CardHeader>
-      {open && (
-        <CardContent>
-          <div className="grid gap-2">
-            {TOP_POST_SOURCES.map((src) => (
-              <div key={src.name} className="flex items-center gap-3 rounded-md border border-[var(--color-border)] px-3 py-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">{src.name}</span>
-                    <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded border ${TIER_COLORS[src.tier]}`}>
-                      T{src.tier}
-                    </span>
-                    <span className="shrink-0 text-[10px] text-[var(--color-muted)] uppercase">{src.type}</span>
-                  </div>
-                  <p className="text-xs text-[var(--color-muted)] mt-0.5">{src.note}</p>
-                </div>
-                {items.length > 0 && (
-                  <span className="shrink-0 text-xs tabular-nums text-[var(--color-muted)]">
-                    {countBySource[src.name] ?? 0} Posts
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-          <p className="text-[10px] text-[var(--color-muted)] mt-3">
-            Festgelegte Quellen — kein Toggle. Keywords im Profil steuern den Filter.
-          </p>
-        </CardContent>
-      )}
-    </Card>
-  );
-}
-
 function OlderDigests({
   digests: older, renderDigest,
 }: {
@@ -312,6 +245,8 @@ function SourceManager({
   title = "Sources",
   description,
   emptyHint = "Noch keine Quellen aktiv. Füge einen RSS-Feed hinzu oder starte den Company-Scrape erneut.",
+  addTitle = "RSS hinzufügen",
+  addDescription,
 }: {
   sources: CompanySourceRow[];
   health: Record<string, SourceHealth>;
@@ -320,6 +255,8 @@ function SourceManager({
   title?: string;
   description?: string;
   emptyHint?: string;
+  addTitle?: string;
+  addDescription?: string;
 }) {
   const [open, setOpen] = useState(true);
   const [name, setName] = useState("");
@@ -378,6 +315,8 @@ function SourceManager({
               sorted.map((row) => {
                 const source = row.sources;
                 const tier = (source?.tier ?? 3) as 1 | 2 | 3;
+                const platformLabel = typeof source?.config?.platform === "string" ? source.config.platform : null;
+                const feedScopeLabel = typeof source?.config?.feed_scope === "string" ? source.config.feed_scope : null;
                 const sourceHealth = health[row.source_id];
                 const acceptedRate = sourceHealth && sourceHealth.items_fetched > 0
                   ? Math.round((sourceHealth.items_accepted / sourceHealth.items_fetched) * 100)
@@ -419,6 +358,16 @@ function SourceManager({
                             {source.type}
                           </span>
                         )}
+                        {platformLabel && (
+                          <span className="shrink-0 text-[10px] text-[var(--color-muted)]">
+                            {platformLabel}
+                          </span>
+                        )}
+                        {feedScopeLabel && (
+                          <span className="shrink-0 text-[10px] text-[var(--color-muted)]">
+                            {feedScopeLabel}
+                          </span>
+                        )}
                       </div>
                       {source?.url && (
                         <a
@@ -451,8 +400,13 @@ function SourceManager({
           <div className="rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] p-3">
             <div className="flex items-center gap-2 mb-2">
               <Rss className="w-4 h-4 text-[var(--color-muted)]" />
-              <span className="text-xs font-bold uppercase tracking-wider">RSS hinzufügen</span>
+              <span className="text-xs font-bold uppercase tracking-wider">{addTitle}</span>
             </div>
+            {addDescription && (
+              <p className="text-xs text-[var(--color-muted)] mb-2">
+                {addDescription}
+              </p>
+            )}
             <div className="grid gap-2 sm:grid-cols-[1fr_1.5fr_auto]">
               <input
                 value={name}
@@ -827,17 +781,26 @@ export function Dashboard() {
   const latestTopPost = topPostDigests[0] ?? null;
   const latestNicheNews = nicheNewsDigests[0] ?? null;
 
-  // Published Content bekommt alle Social-/Foren-Quellen + user-scoped top_post Feeds.
-  // Niche News behält nur redaktionelle Fachartikel-Quellen.
+  // Niche News = redaktionelle Fachartikel. Published Content = Social, Community und Diskussionsquellen.
   const isPublishedContentSource = (row: CompanySourceRow): boolean => {
     const src = row.sources;
     if (!src) return false;
-    if ((src.config?.feed_scope as string | undefined) === "top_post") return true;
+    const scope = src.config?.feed_scope as string | undefined;
+    if (scope === "top_post" || scope === "both") return true;
     const platform = src.config?.platform as string | undefined;
     if (platform === "YouTube" || platform === "Twitter/X" || platform === "LinkedIn") return true;
     return ["reddit", "hackernews", "producthunt", "twitter"].includes(src.type);
   };
-  const nicheSourceRows = sourceRows.filter((row) => !isPublishedContentSource(row));
+  const isNicheNewsSource = (row: CompanySourceRow): boolean => {
+    const src = row.sources;
+    if (!src) return false;
+    const scope = src.config?.feed_scope as string | undefined;
+    if (scope === "niche_news" || scope === "both") return true;
+    if (scope === "top_post") return false;
+    if (isPublishedContentSource(row)) return false;
+    return src.type === "rss" || src.type === "newsapi" || src.type === "custom";
+  };
+  const nicheSourceRows = sourceRows.filter((row) => isNicheNewsSource(row));
   const topPostSourceRows = sourceRows.filter((row) => isPublishedContentSource(row));
 
   function renderTopPost(d: DigestWithItems) {
@@ -989,7 +952,9 @@ export function Dashboard() {
               onToggle={toggleSource}
               onAddRss={addRssSource}
               title="Fachartikel-Quellen"
-              description="Redaktionelle Artikel & Blogs — Social Media und Foren laufen im Published Content"
+              description="Redaktionelle Artikel, Blogs und Fachpublikationen. Social Media, Foren und HN laufen im Published Content."
+              addTitle="Fachartikel-RSS hinzufügen"
+              addDescription="Für Blogs, Magazine, Vendor-Newsrooms oder Fachpublikationen. Diese Quelle erscheint im Niche-News-Digest."
             />
             {latestNicheNews ? (
               <>
@@ -1020,15 +985,16 @@ export function Dashboard() {
         {/* Published Content */}
         {selectedTool === "top_post" && (
           <div>
-            <TopPostSourcePanel items={latestTopPost?.items ?? []} />
             <SourceManager
               sources={topPostSourceRows}
               health={sourceHealth}
               onToggle={toggleSource}
               onAddRss={addTopPostRssSource}
               title="Community & eigene Quellen"
-              description="Reddit, HN, YouTube, X, LinkedIn & eigene RSS-Feeds — ausschließlich für Published Content"
-              emptyHint="Noch keine Community- oder eigenen Quellen. Füge unten einen RSS-Feed hinzu, der nur in Published Content einfließt."
+              description="Reddit, Hacker News, YouTube, X, LinkedIn, Product Hunt und eigene Social-/Community-RSS-Feeds."
+              emptyHint="Noch keine Community- oder Social-Quellen. Füge unten einen Feed hinzu oder starte den Company-Scrape erneut."
+              addTitle="Published-Content-Quelle hinzufügen"
+              addDescription="Für YouTube-, X-, LinkedIn-, Reddit-/Community- oder andere Social-RSS-Feeds. Diese Quelle erscheint nur im Published-Content-Digest."
             />
             {latestTopPost ? (
               <>
