@@ -16,7 +16,6 @@ import { callClaudeJSON, DEFAULT_MODEL } from "../_shared/claude.ts";
 import { fetchArticleBody } from "../_shared/article_body.ts";
 import {
   type ClusterSignalMetrics,
-  type ClusterVoteSignal,
   computeConfidence,
   computeSignalMetrics,
   type Confidence,
@@ -24,6 +23,12 @@ import {
   prepareClusters,
   type TrendMemoryEntry,
 } from "../_shared/digest_quality.ts";
+import {
+  interestPromptNote,
+  loadClusterVoteSignals,
+  loadRelevanceProfile,
+  type RelevanceProfile,
+} from "../_shared/relevance.ts";
 
 const CLUSTERING_PROMPT =
   `Du erhältst eine Liste von News-Items aus verschiedenen Quellen mit Quellen-Tier (1=Primärquelle, 2=Editorial, 3=Community).
@@ -71,8 +76,19 @@ export async function handle(
   }
 
   // 1. Clustering via Haiku (deterministisch, günstig).
-  const rawClusters = await clusterItems(items, company);
-  const voteSignals = await loadVoteSignals(client);
+  // Gelerntes Profil (Item-Votes) liefert Interessens-Hinweise für den Prompt;
+  // Cluster-Votes (decayed, company-scoped) gewichten das Cluster-Ranking.
+  const relevanceProfile = await loadRelevanceProfile(
+    client,
+    company.id,
+    "niche_news",
+  );
+  const rawClusters = await clusterItems(items, company, relevanceProfile);
+  const voteSignals = await loadClusterVoteSignals(
+    client,
+    company.id,
+    "niche_news",
+  );
   const clusters = prepareClusters(rawClusters, voteSignals).slice(0, 20);
   if (clusters.length === 0) {
     return { message: "Keine validen Cluster, kein Digest erzeugt." };
@@ -214,6 +230,7 @@ export async function handle(
 async function clusterItems(
   items: NewsItem[],
   company: Company,
+  profile: RelevanceProfile,
 ): Promise<DigestCluster[]> {
   const itemsList = items
     .map((item, idx) =>
@@ -229,7 +246,9 @@ async function clusterItems(
       role: "user",
       content: `Industrie: ${company.industry}\nNische: ${
         company.niche ?? ""
-      }\nKeywords: ${company.keywords.join(", ")}\n\nItems:\n${itemsList}`,
+      }\nKeywords: ${company.keywords.join(", ")}${
+        interestPromptNote(profile)
+      }\n\nItems:\n${itemsList}`,
     }],
     max_tokens: 4000,
   });
@@ -268,25 +287,6 @@ async function loadTrendMemory(
     .filter((x): x is { cluster_name: string; weeks_ago: number } =>
       x !== null
     );
-}
-
-async function loadVoteSignals(
-  client: SupabaseClient,
-): Promise<ClusterVoteSignal[]> {
-  const { data } = await client
-    .from("votes")
-    .select("target_id, value")
-    .eq("target_type", "cluster");
-
-  if (!data) return [];
-  const scores = new Map<string, number>();
-  for (const row of data as { target_id: string; value: number }[]) {
-    scores.set(row.target_id, (scores.get(row.target_id) ?? 0) + row.value);
-  }
-  return [...scores.entries()].map(([target_id, score]) => ({
-    target_id,
-    score,
-  }));
 }
 
 // Top-3-Items pro Cluster (T1 vor T2 vor T3, dann Score, dann Datum) — Bodies fetchen.

@@ -1,6 +1,14 @@
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { Company, Job, NewsItem } from "../_shared/types.ts";
 import { callClaudeJSON, DEFAULT_MODEL } from "../_shared/claude.ts";
+import {
+  interestPromptNote,
+  loadRelevanceProfile,
+  NEUTRAL_PROFILE,
+  type RelevanceProfile,
+  sourceWeightFor,
+  topicBoost,
+} from "../_shared/relevance.ts";
 
 interface PublishedContentItem {
   title: string;
@@ -56,13 +64,15 @@ export async function handle(
   const { data: co } = await c.from("companies").select("*").eq("id", job.company_id).single();
   if (!co) throw new Error(`Company ${job.company_id} not found`);
 
-  // Top 30 by combined rank (score + tier + recency)
+  // Top 30 by combined rank (score×weight + tier + recency + topic-boost).
+  // Das gelernte Profil (Item-Votes, top_post-scoped) moduliert das Ranking.
+  const profile = await loadRelevanceProfile(c, job.company_id, "top_post");
   const topItems = [...items]
-    .sort((a, b) => itemRank(b) - itemRank(a))
+    .sort((a, b) => itemRank(b, profile) - itemRank(a, profile))
     .slice(0, 30);
 
   // Step 1: Cluster by topic
-  const clusters = await clusterByTopic(topItems);
+  const clusters = await clusterByTopic(topItems, profile);
 
   // Step 2: Synthesize each cluster in parallel
   const contentClusters: PublishedContentCluster[] = (
@@ -137,6 +147,7 @@ export async function handle(
 
 async function clusterByTopic(
   items: NewsItem[],
+  profile: RelevanceProfile = NEUTRAL_PROFILE,
 ): Promise<{ topic: string; item_indices: number[] }[]> {
   const itemList = items
     .map((item, i) => `[${i}] ${item.source_name} | ▲${item.score ?? "?"} | ${item.title}`)
@@ -146,7 +157,10 @@ async function clusterByTopic(
     const result = await callClaudeJSON<{ clusters: { topic: string; item_indices: number[] }[] }>({
       model: DEFAULT_MODEL,
       system: CLUSTER_PROMPT,
-      messages: [{ role: "user", content: `Items:\n${itemList}` }],
+      messages: [{
+        role: "user",
+        content: `${interestPromptNote(profile)}\nItems:\n${itemList}`.trim(),
+      }],
       max_tokens: 1500,
       temperature: 0,
     });
@@ -184,11 +198,11 @@ async function synthCluster(items: NewsItem[], co: Company) {
   }
 }
 
-function itemRank(item: NewsItem): number {
-  const score = item.score ?? 0;
+function itemRank(item: NewsItem, profile: RelevanceProfile): number {
+  const score = (item.score ?? 0) * sourceWeightFor(item, profile);
   const tierBoost = item.source_tier === 1 ? 60 : item.source_tier === 2 ? 35 : 10;
   const ageBoost = recencyBoost(item.published_at);
-  return score + tierBoost + ageBoost;
+  return score + tierBoost + ageBoost + topicBoost(item, profile);
 }
 
 function recencyBoost(publishedAt: string | null): number {

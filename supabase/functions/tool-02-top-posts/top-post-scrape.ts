@@ -1,5 +1,11 @@
 import { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { Job, NewsItem } from "../_shared/types.ts";
+import {
+  capMutedSources,
+  loadRelevanceProfile,
+  sourceWeightFor,
+  topicBoost,
+} from "../_shared/relevance.ts";
 
 const MAX_PER_SOURCE = 50;
 const WINDOW_DAYS = 7;
@@ -88,9 +94,13 @@ export async function handle(
     .flatMap((r) => r.value);
 
   const deduped = dedup(items);
-  // Sort by engagement score desc before capping
-  const sorted = [...deduped].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  const capped = sorted.slice(0, MAX_TOTAL_ITEMS);
+  // Engagement-first Ranking, moduliert durch das gelernte Relevanz-Profil:
+  // Score × Source-Weight + Topic-Boost. Gemutete Quellen werden gekappt.
+  const profile = await loadRelevanceProfile(c, job.company_id, "top_post");
+  const rank = (i: NewsItem) =>
+    (i.score ?? 0) * sourceWeightFor(i, profile) + topicBoost(i, profile);
+  const sorted = [...deduped].sort((a, b) => rank(b) - rank(a));
+  const capped = capMutedSources(sorted, profile).slice(0, MAX_TOTAL_ITEMS);
 
   const { data: cj, error } = await c.from("jobs").insert({
     type: "top_post_cluster",

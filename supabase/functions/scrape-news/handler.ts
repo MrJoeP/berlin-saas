@@ -16,6 +16,7 @@ import {
   type CompanySourceWithSource,
   filterItems,
 } from "../_shared/news_filter.ts";
+import { loadRelevanceProfile } from "../_shared/relevance.ts";
 
 const MAX_RAW_ITEMS_PER_SOURCE = 150;
 const MAX_FILTERED_ITEMS = 600;
@@ -92,13 +93,20 @@ export async function handle(
     }
   }
 
-  // Pre-Filter Pipeline.
+  // Pre-Filter Pipeline. Gelerntes Relevanz-Profil (aus Item-Votes) fließt
+  // ins Ranking: bevorzugte Quellen steigen, gemutete werden gekappt.
+  const relevanceProfile = await loadRelevanceProfile(
+    client,
+    job.company_id,
+    "niche_news",
+  );
   const filtered = filterItems(
     rawItems,
     companySources as unknown as CompanySourceWithSource[],
     keywords,
     undefined,
     negativeKeywords,
+    relevanceProfile,
   )
     .slice(0, MAX_FILTERED_ITEMS);
 

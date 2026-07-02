@@ -1,4 +1,10 @@
 import { NewsItem, Source } from "./types.ts";
+import {
+  capMutedSources,
+  NEUTRAL_PROFILE,
+  relevanceRank,
+  type RelevanceProfile,
+} from "./relevance.ts";
 
 export interface CompanySourceWithSource {
   sources: Source | null;
@@ -10,6 +16,7 @@ export function filterItems(
   keywords: string[],
   now = Date.now(),
   negativeKeywords: string[] = [],
+  profile: RelevanceProfile = NEUTRAL_PROFILE,
 ): NewsItem[] {
   const sourceConfig: Record<
     string,
@@ -66,6 +73,23 @@ export function filterItems(
     passed.push(item);
   }
 
+  const hasProfile = profile.voteCount > 0 ||
+    Object.keys(profile.sourceWeights).length > 0 ||
+    profile.interestTokens.length > 0;
+
+  if (hasProfile) {
+    // Gelerntes Ranking: Tier×Source-Weight + Topic-Boost + Engagement.
+    // Muted-Quellen werden gekappt statt entfernt (Rehabilitation möglich).
+    passed.sort((a, b) => {
+      const diff = relevanceRank(b, profile) - relevanceRank(a, profile);
+      if (diff !== 0) return diff;
+      return new Date(b.published_at ?? 0).getTime() -
+        new Date(a.published_at ?? 0).getTime();
+    });
+    return capMutedSources(passed, profile);
+  }
+
+  // Ohne Vote-Daten: klassisches Ranking (Tier → Score → Datum).
   passed.sort((a, b) => {
     if (a.source_tier !== b.source_tier) return a.source_tier - b.source_tier;
     if ((b.score ?? 0) !== (a.score ?? 0)) {
