@@ -14,6 +14,7 @@ import {
   type Vote,
 } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
+import { LearnedPreferences } from "@/components/LearnedPreferences";
 import { Button } from "@/components/ui/Button";
 import {
   Card,
@@ -963,6 +964,7 @@ export function Dashboard() {
         {selectedTool === "niche_news" && (
           <div>
             <JobStatusPanel jobs={nicheJobs} title="Niche News Briefing" />
+            <LearnedPreferences companyId={company.id} digestType="niche_news" />
             <SourceManager
               sources={nicheSourceRows}
               health={sourceHealth}
@@ -1003,6 +1005,7 @@ export function Dashboard() {
         {selectedTool === "top_post" && (
           <div>
             <JobStatusPanel jobs={topPostJobs} title="Published Content" />
+            <LearnedPreferences companyId={company.id} digestType="top_post" />
             <SourceManager
               sources={topPostSourceRows}
               health={sourceHealth}
