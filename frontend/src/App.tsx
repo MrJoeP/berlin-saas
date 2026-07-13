@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Login } from "@/pages/Login";
 import { Setup } from "@/pages/Setup";
 import { Dashboard } from "@/pages/Dashboard";
+import { MarketRadar } from "@/features/market-radar/MarketRadar";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth();
@@ -40,6 +41,19 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+          {/* Dev-only UI-Review ohne Login. import.meta.env.DEV ist im Production-Build false. */}
+          {import.meta.env.DEV && (
+            <Route
+              path="/radar-preview"
+              element={
+                <div className="min-h-screen px-4 py-8">
+                  <div className="max-w-4xl mx-auto">
+                    <MarketRadar />
+                  </div>
+                </div>
+              }
+            />
+          )}
           <Route path="/setup" element={<ProtectedRoute><Setup /></ProtectedRoute>} />
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
