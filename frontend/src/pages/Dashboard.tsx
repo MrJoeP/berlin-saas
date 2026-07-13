@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { ArrowRight, RefreshCw, ChevronDown, ChevronRight, Plus, LogOut, Rss, ExternalLink } from "lucide-react";
 import { NicheNewsDigest } from "@/features/niche-news/NicheNewsDigest";
 import { TopPostDigest, type PublishedContentCluster } from "@/features/top-posts/TopPostDigest";
+import { MarketRadar } from "@/features/market-radar/MarketRadar";
 import {
   supabase,
   type Company,
@@ -502,7 +503,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [triggering, setTriggering] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [selectedTool, setSelectedTool] = useState<"niche_news" | "top_post">("niche_news");
+  const [selectedTool, setSelectedTool] = useState<"niche_news" | "top_post" | "radar">("niche_news");
   // Map<target_type:target_id, vote-value (-1 oder +1)>
   const [votes, setVotes] = useState<Record<string, -1 | 1>>({});
   const { session, signOut } = useAuth();
@@ -940,8 +941,8 @@ export function Dashboard() {
 
         {/* Tool-Auswahl */}
         <div className="flex gap-0 mb-6 border-b border-[var(--color-border)]">
-          {(["niche_news", "top_post"] as const).map((tool) => {
-            const label = tool === "niche_news" ? "Niche News" : "Published Content";
+          {(["niche_news", "top_post", "radar"] as const).map((tool) => {
+            const label = tool === "niche_news" ? "Niche News" : tool === "top_post" ? "Published Content" : "Market Radar";
             const active = selectedTool === tool;
             return (
               <button
@@ -1040,6 +1041,9 @@ export function Dashboard() {
             )}
           </div>
         )}
+
+        {/* Market Radar (Woche 3, Demo-Modus bis Backend steht) */}
+        {selectedTool === "radar" && <MarketRadar />}
 
       </div>
     </div>
