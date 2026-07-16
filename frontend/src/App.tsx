@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Login } from "@/pages/Login";
 import { Setup } from "@/pages/Setup";
 import { Dashboard } from "@/pages/Dashboard";
+import { EarlyAccess } from "@/pages/EarlyAccess";
 import { MarketRadar } from "@/features/market-radar/MarketRadar";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -41,6 +42,8 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+          {/* Öffentliche Waitlist für Testzugänge, bewusst ohne Auth-Guard. */}
+          <Route path="/early-access" element={<EarlyAccess />} />
           {/* Dev-only UI-Review ohne Login. import.meta.env.DEV ist im Production-Build false. */}
           {import.meta.env.DEV && (
             <Route
