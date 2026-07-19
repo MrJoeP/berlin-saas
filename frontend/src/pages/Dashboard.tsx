@@ -15,6 +15,7 @@ import {
   type Vote,
 } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
+import { checkInviteAccess } from "@/lib/invite";
 import { LearnedPreferences } from "@/components/LearnedPreferences";
 import { Button } from "@/components/ui/Button";
 import {
@@ -501,6 +502,7 @@ export function Dashboard() {
   const [sourceHealth, setSourceHealth] = useState<Record<string, SourceHealth>>({});
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [notInvited, setNotInvited] = useState(false);
   const [triggering, setTriggering] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [selectedTool, setSelectedTool] = useState<"niche_news" | "top_post" | "radar">("niche_news");
@@ -630,7 +632,13 @@ export function Dashboard() {
     if (!companies || companies.length === 0) {
       setCompany(null);
       setAllCompanies([]);
+      // Invite-Gate: ohne Freischaltung kein Setup, sondern die Warteseite.
+      const access = await checkInviteAccess(session?.user.email);
       setLoading(false);
+      if (access === "not_invited") {
+        setNotInvited(true);
+        return;
+      }
       navigate("/setup");
       return;
     }
@@ -793,6 +801,31 @@ export function Dashboard() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <p className="text-sm text-[var(--color-muted)]">Lade...</p>
+      </div>
+    );
+  }
+
+  if (notInvited) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle>You are not in yet</CardTitle>
+            <CardDescription>
+              This is a private beta. {session?.user.email} is not unlocked for test access yet.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-[var(--color-muted)] mb-4">
+              Test spots open a few at a time. If you are on the early access list,
+              you will get an email as soon as your access is ready.
+            </p>
+            <div className="flex gap-2">
+              <Button onClick={() => navigate("/early-access")}>Join the list</Button>
+              <Button variant="ghost" onClick={signOut}>Sign out</Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
