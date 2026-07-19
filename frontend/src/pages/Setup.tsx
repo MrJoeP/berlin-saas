@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
+import { checkInviteAccess } from "@/lib/invite";
 import { normalizeDomain } from "@/lib/domain";
 import { Button } from "@/components/ui/Button";
 import { Input, Label, Field } from "@/components/ui/Input";
@@ -33,6 +34,18 @@ export function Setup() {
   const [url, setUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Invite-Gate: ohne Freischaltung zurück zum Dashboard (zeigt die Warteseite).
+  // Server-seitig sichert die companies-Insert-Policy (Migration 038) ab.
+  useEffect(() => {
+    let active = true;
+    void checkInviteAccess(session?.user.email).then((access) => {
+      if (active && access === "not_invited") navigate("/", { replace: true });
+    });
+    return () => {
+      active = false;
+    };
+  }, [session?.user.email, navigate]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
