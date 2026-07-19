@@ -44,7 +44,13 @@ export function Login() {
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Berlin SaaS</CardTitle>
-          <CardDescription>10 weeks. 10 AI tools for founders.</CardDescription>
+          <CardDescription>
+            Private beta, Zugang nur mit Einladung. Ohne Einladung:{" "}
+            <a href="/early-access" className="text-[var(--color-accent)] hover:underline">
+              Early-Access-Liste
+            </a>
+            .
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {status === "sent" ? (

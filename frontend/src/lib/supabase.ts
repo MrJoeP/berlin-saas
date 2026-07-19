@@ -131,6 +131,23 @@ export interface DigestItem {
   source_tier: 1 | 2 | 3 | null;
   cluster_confidence: "verified" | "editorial" | "community" | null;
   published_at: string | null;
+  raw_json?: Record<string, unknown> | null;
+}
+
+// Market Radar (Woche 3): beobachtete Entität.
+export interface RadarEntity {
+  id: string;
+  company_id: string;
+  name: string;
+  type: "competitor" | "substitute" | "complement";
+  aliases: string[];
+  urls: { landing?: string; pricing?: string; changelog?: string };
+  keywords: string[];
+  note: string | null;
+  active: boolean;
+  drift_streak: number;
+  fetch_health: Record<string, { status?: string; checked_at?: string; error?: string; word_count?: number; via?: string }>;
+  created_at: string;
 }
 
 // Vote in unified votes-Tabelle. value ist +1 oder -1, eindeutig pro user+target.

@@ -10,6 +10,9 @@ import { handle as scrapeNews } from "../scrape-news/handler.ts";
 import { handle as generateDigest } from "../generate-digest/handler.ts";
 import { handle as topPostScrape } from "../tool-02-top-posts/top-post-scrape.ts";
 import { handle as topPostCluster } from "../tool-02-top-posts/top-post-cluster.ts";
+import { handle as radarSnapshot } from "../tool-03-market-radar/radar-snapshot.ts";
+import { handle as radarSignals } from "../tool-03-market-radar/radar-signals.ts";
+import { handle as radarDigest } from "../tool-03-market-radar/radar-digest.ts";
 
 export type JobHandler = (
   job: Job,
@@ -22,6 +25,9 @@ const handlers: Record<JobType, JobHandler> = {
   niche_news_cluster: generateDigest,
   top_post_scrape: topPostScrape,
   top_post_cluster: topPostCluster,
+  radar_snapshot: radarSnapshot,
+  radar_signals: radarSignals,
+  radar_digest: radarDigest,
 };
 
 export async function dispatch(job: Job, client: SupabaseClient): Promise<Record<string, unknown>> {

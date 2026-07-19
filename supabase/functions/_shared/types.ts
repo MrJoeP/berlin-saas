@@ -7,7 +7,10 @@ export type JobType =
   | "niche_news_scrape"
   | "niche_news_cluster"
   | "top_post_scrape"
-  | "top_post_cluster";
+  | "top_post_cluster"
+  | "radar_snapshot"
+  | "radar_signals"
+  | "radar_digest";
 
 export interface Job {
   id: string;

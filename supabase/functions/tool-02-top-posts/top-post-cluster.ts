@@ -176,7 +176,7 @@ async function synthCluster(items: NewsItem[], co: Company) {
       `- [${item.source_name} | ▲${item.score ?? "?"}] ${item.title}` +
       (item.raw?.excerpt ? `\n  ${String(item.raw.excerpt).slice(0, 300)}` : "")
     )
-    .join("\n\n");
+    .join("\n");
 
   const system = SYNTH_PROMPT
     .replace("{company}", co.name ?? co.url ?? "")
