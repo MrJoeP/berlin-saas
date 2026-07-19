@@ -17,7 +17,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
-  if (!session) return <Navigate to="/login" state={{ from: location }} replace />;
+  // Öffentliche Besucher landen auf der Early-Access-Seite, nicht im Login.
+  // Das Dashboard ist private Beta; /login bleibt direkt erreichbar.
+  if (!session) return <Navigate to="/early-access" state={{ from: location }} replace />;
   return <>{children}</>;
 }
 

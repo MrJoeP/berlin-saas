@@ -134,6 +134,10 @@ export function EarlyAccess() {
           >
             LinkedIn
           </a>
+          . Already invited?{" "}
+          <a href="/login" className="text-[var(--color-accent)] hover:underline">
+            Sign in
+          </a>
           .
         </p>
       </div>

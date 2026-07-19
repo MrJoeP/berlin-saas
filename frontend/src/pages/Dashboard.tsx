@@ -743,6 +743,19 @@ export function Dashboard() {
     await loadJobs(company.id);
   }
 
+  async function triggerRadar() {
+    if (!company) return;
+    setTriggering(true);
+    const { data, error } = await supabase
+      .from("jobs")
+      .insert({ type: "radar_snapshot", company_id: company.id })
+      .select()
+      .single();
+    if (!error && data) setJobs((prev) => [data as Job, ...prev]);
+    setTriggering(false);
+    await loadJobs(company.id);
+  }
+
   async function triggerTopPost() {
     if (!company) return;
     setTriggering(true);
@@ -790,6 +803,7 @@ export function Dashboard() {
 
   const topPostDigests = digests.filter((d) => d.type === "top_post");
   const nicheNewsDigests = digests.filter((d) => d.type === "niche_news");
+  const radarDigests = digests.filter((d) => d.type === "competitor");
   const latestTopPost = topPostDigests[0] ?? null;
   const latestNicheNews = nicheNewsDigests[0] ?? null;
 
@@ -818,6 +832,7 @@ export function Dashboard() {
   // Job-Status pro Tab: jeder Tab zeigt nur den Status seiner eigenen Pipeline.
   const nicheJobs = jobs.filter((job) => job.type.startsWith("niche_news"));
   const topPostJobs = jobs.filter((job) => job.type.startsWith("top_post"));
+  const radarJobs = jobs.filter((job) => job.type.startsWith("radar"));
 
   function renderTopPost(d: DigestWithItems) {
     return (
@@ -1042,8 +1057,20 @@ export function Dashboard() {
           </div>
         )}
 
-        {/* Market Radar (Woche 3, Demo-Modus bis Backend steht) */}
-        {selectedTool === "radar" && <MarketRadar />}
+        {/* Market Radar (Woche 3): echte Daten, Demo-Fallback bis Migration 036 angewendet ist */}
+        {selectedTool === "radar" && (
+          <div>
+            <JobStatusPanel jobs={radarJobs} title="Market Radar" />
+            <MarketRadar
+              company={company}
+              digests={radarDigests}
+              votes={votes}
+              onVote={voteItem}
+              onTrigger={triggerRadar}
+              triggering={triggering}
+            />
+          </div>
+        )}
 
       </div>
     </div>
